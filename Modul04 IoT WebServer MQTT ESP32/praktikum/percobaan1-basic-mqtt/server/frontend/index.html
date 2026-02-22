@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Percobaan 1 – MQTT Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 28px;
+    }
+
+    header h1 { font-size: 1.5rem; color: #38bdf8; }
+
+    #status-bar {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      font-size: 0.85rem;
+      color: #94a3b8;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 9999px;
+      padding: 4px 12px;
+      font-size: 0.8rem;
+    }
+
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #22c55e;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    /* ── Stat cards ── */
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 20px 24px;
+    }
+
+    .card-label { font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: .05em; }
+    .card-value { font-size: 2rem; font-weight: 700; color: #38bdf8; margin-top: 6px; }
+    .card-sub   { font-size: 0.8rem; color: #94a3b8; margin-top: 4px; }
+
+    /* ── Table ── */
+    .table-wrap {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .table-wrap h2 {
+      padding: 16px 24px;
+      font-size: 1rem;
+      border-bottom: 1px solid #334155;
+      color: #cbd5e1;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+
+    thead th {
+      text-align: left;
+      padding: 12px 16px;
+      background: #0f172a;
+      color: #64748b;
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      letter-spacing: .05em;
+    }
+
+    tbody tr { border-top: 1px solid #1e3a5f22; transition: background .15s; }
+    tbody tr:hover { background: #0f172a55; }
+    tbody td { padding: 10px 16px; color: #cbd5e1; }
+
+    .device-tag {
+      display: inline-block;
+      background: #0c4a6e;
+      color: #38bdf8;
+      border-radius: 6px;
+      padding: 2px 8px;
+      font-size: 0.78rem;
+      font-weight: 600;
+    }
+
+    #loading {
+      text-align: center;
+      padding: 40px;
+      color: #64748b;
+    }
+
+    #error-msg {
+      display: none;
+      background: #7f1d1d;
+      border: 1px solid #ef4444;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-bottom: 20px;
+      color: #fca5a5;
+      font-size: 0.875rem;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>📡 Percobaan 1 – MQTT Dashboard</h1>
+  <div id="status-bar">
+    <span class="badge"><span class="dot"></span> Live</span>
+    <span id="last-update">–</span>
+  </div>
+</header>
+
+<div id="error-msg"></div>
+
+<!-- Stat cards -->
+<div class="cards">
+  <div class="card">
+    <div class="card-label">Total Pesan</div>
+    <div class="card-value" id="stat-total">–</div>
+    <div class="card-sub">tersimpan di database</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Device Terakhir</div>
+    <div class="card-value" style="font-size:1.3rem" id="stat-device">–</div>
+    <div class="card-sub">pengirim pesan terbaru</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Counter Terakhir</div>
+    <div class="card-value" id="stat-counter">–</div>
+    <div class="card-sub">nomor urut pesan</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Uptime Terakhir</div>
+    <div class="card-value" id="stat-uptime">–</div>
+    <div class="card-sub">detik sejak boot ESP32</div>
+  </div>
+</div>
+
+<!-- Data table -->
+<div class="table-wrap">
+  <h2>📋 50 Pesan Terbaru</h2>
+  <div id="loading">Memuat data…</div>
+  <table id="data-table" style="display:none">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Device</th>
+        <th>Uptime (s)</th>
+        <th>Counter</th>
+        <th>Message</th>
+        <th>Diterima</th>
+      </tr>
+    </thead>
+    <tbody id="table-body"></tbody>
+  </table>
+</div>
+
+<script>
+  const API_URL      = '/api/data';
+  const REFRESH_MS   = 3000;
+
+  const tbody       = document.getElementById('table-body');
+  const tableEl     = document.getElementById('data-table');
+  const loadingEl   = document.getElementById('loading');
+  const errorEl     = document.getElementById('error-msg');
+  const lastUpdate  = document.getElementById('last-update');
+  const statTotal   = document.getElementById('stat-total');
+  const statDevice  = document.getElementById('stat-device');
+  const statCounter = document.getElementById('stat-counter');
+  const statUptime  = document.getElementById('stat-uptime');
+
+  function showError(msg) {
+    errorEl.textContent = `⚠️ ${msg}`;
+    errorEl.style.display = 'block';
+  }
+
+  function hideError() { errorEl.style.display = 'none'; }
+
+  function formatDate(iso) {
+    if (!iso) return '–';
+    const d = new Date(iso.replace(' ', 'T') + 'Z');
+    return isNaN(d) ? iso : d.toLocaleString('id-ID', { hour12: false });
+  }
+
+  async function fetchData() {
+    try {
+      const res = await fetch(API_URL);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      hideError();
+      renderData(json);
+    } catch (err) {
+      showError(`Gagal mengambil data: ${err.message}`);
+    }
+  }
+
+  function renderData({ total, data }) {
+    statTotal.textContent = total ?? '–';
+
+    if (!data || data.length === 0) {
+      loadingEl.textContent = 'Belum ada data. Tunggu pesan dari ESP32…';
+      loadingEl.style.display = 'block';
+      tableEl.style.display = 'none';
+      return;
+    }
+
+    const latest = data[0];
+    statDevice.textContent  = latest.device  ?? '–';
+    statCounter.textContent = latest.counter ?? '–';
+    statUptime.textContent  = latest.uptime  ?? '–';
+
+    tbody.innerHTML = data.map((row, idx) => `
+      <tr>
+        <td style="color:#64748b">${idx + 1}</td>
+        <td><span class="device-tag">${escHtml(row.device ?? '')}</span></td>
+        <td>${row.uptime ?? '–'}</td>
+        <td>${row.counter ?? '–'}</td>
+        <td style="color:#94a3b8">${escHtml(row.message ?? '')}</td>
+        <td style="color:#64748b;font-size:.8rem">${formatDate(row.received_at)}</td>
+      </tr>
+    `).join('');
+
+    loadingEl.style.display = 'none';
+    tableEl.style.display   = 'table';
+    lastUpdate.textContent  = 'Update: ' + new Date().toLocaleTimeString('id-ID');
+  }
+
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // Initial fetch + polling
+  fetchData();
+  setInterval(fetchData, REFRESH_MS);
+</script>
+</body>
+</html>

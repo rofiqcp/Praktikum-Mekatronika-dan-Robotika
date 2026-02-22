@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS mqtt_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  device TEXT NOT NULL,
+  uptime INTEGER,
+  counter INTEGER,
+  message TEXT,
+  received_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);

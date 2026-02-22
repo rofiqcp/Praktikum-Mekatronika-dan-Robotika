@@ -1,0 +1,14 @@
+{
+  "name": "praktikum1-backend",
+  "version": "1.0.0",
+  "description": "Backend Percobaan 1 - Basic MQTT",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "better-sqlite3": "^9.4.3",
+    "cors": "^2.8.5"
+  }
+}
