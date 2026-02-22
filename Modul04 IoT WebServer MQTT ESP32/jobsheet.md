@@ -318,7 +318,7 @@ mosquitto_pub -h localhost -t "iot/test" -m "Hello MQTT dari Terminal"
        knolleary/PubSubClient @ ^2.8
        adafruit/DHT sensor library @ ^1.4.6
        adafruit/Adafruit Unified Sensor @ ^1.1.14
-       bblanchon/ArduinoJson @ ^7.0.4
+       bblanchon/ArduinoJson @ ^6.21.0
    ```
 
 6. Simpan dengan `Ctrl+S` → PlatformIO otomatis mengunduh library
@@ -445,7 +445,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   Serial.println("Pesan diterima [" + String(topic) + "]: " + msg);
 
   // Parse perintah JSON
-  JsonDocument doc;
+  StaticJsonDocument<256> doc;
   if (deserializeJson(doc, msg) == DeserializationError::Ok) {
     const char* command = doc["command"];
     bool state = doc["state"];
@@ -512,7 +512,7 @@ void loop() {
     }
 
     // Buat payload JSON
-    JsonDocument doc;
+    StaticJsonDocument<256> doc;
     doc["device_id"]      = DEVICE_ID;
     doc["timestamp"]      = millis() / 1000;
     doc["temperature"]    = round(temperature * 10) / 10.0;
