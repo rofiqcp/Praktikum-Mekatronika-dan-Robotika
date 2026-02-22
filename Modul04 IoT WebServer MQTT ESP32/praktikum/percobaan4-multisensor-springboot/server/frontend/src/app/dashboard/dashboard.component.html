@@ -1,0 +1,142 @@
+<div class="dashboard">
+  <header class="dash-header">
+    <h1>🌡️ Percobaan 4 – Multi-Sensor Dashboard</h1>
+    <div class="meta">
+      <span>Polling setiap 5 detik</span>
+      <span class="updated">Diperbarui: <strong>{{ lastUpdated }}</strong></span>
+    </div>
+  </header>
+
+  <!-- ── Error Banner ─────────────────────────────────────── -->
+  <div class="error-banner" *ngIf="errorMessage">
+    ⚠️ {{ errorMessage }}
+  </div>
+
+  <!-- ── Metric Cards ─────────────────────────────────────── -->
+  <section class="cards" *ngIf="latest">
+    <!-- Temperature -->
+    <div class="card" [ngClass]="'temp-' + tempClass(latest.temperature)">
+      <div class="card-icon">🌡️</div>
+      <div class="card-label">Suhu</div>
+      <div class="card-value">{{ latest.temperature | number:'1.1-1' }}°C</div>
+      <div class="card-sub">{{ (latest.temperature * 9/5 + 32) | number:'1.1-1' }}°F</div>
+    </div>
+
+    <!-- Humidity -->
+    <div class="card" [ngClass]="'hum-' + humidityClass(latest.humidity)">
+      <div class="card-icon">💧</div>
+      <div class="card-label">Kelembaban</div>
+      <div class="card-value">{{ latest.humidity | number:'1.1-1' }}%</div>
+      <div class="card-sub">Relatif</div>
+    </div>
+
+    <!-- Light -->
+    <div class="card card-light">
+      <div class="card-icon">☀️</div>
+      <div class="card-label">Cahaya</div>
+      <div class="card-value">{{ latest.light }}%</div>
+      <div class="card-sub">
+        <div class="progress-bar">
+          <div class="progress-fill" [style.width.%]="latest.light"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Soil Moisture -->
+    <div class="card" [ngClass]="'soil-' + soilClass(latest.soilMoisture)">
+      <div class="card-icon">🌱</div>
+      <div class="card-label">Kelembaban Tanah</div>
+      <div class="card-value">{{ latest.soilMoisture }}%</div>
+      <div class="card-sub">
+        <div class="progress-bar">
+          <div class="progress-fill soil" [style.width.%]="latest.soilMoisture"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="no-data" *ngIf="!latest && !errorMessage">
+    ⏳ Menunggu data dari ESP32...
+  </div>
+
+  <!-- ── Stats Table ───────────────────────────────────────── -->
+  <section class="stats-section" *ngIf="stats">
+    <h2>Statistik Keseluruhan</h2>
+    <table class="stats-table">
+      <thead>
+        <tr>
+          <th>Sensor</th>
+          <th>Min</th>
+          <th>Max</th>
+          <th>Rata-rata</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>🌡️ Suhu (°C)</td>
+          <td>{{ stats.temperature?.min | number:'1.1-1' }}</td>
+          <td>{{ stats.temperature?.max | number:'1.1-1' }}</td>
+          <td>{{ stats.temperature?.avg | number:'1.1-1' }}</td>
+        </tr>
+        <tr>
+          <td>💧 Kelembaban (%)</td>
+          <td>{{ stats.humidity?.min | number:'1.1-1' }}</td>
+          <td>{{ stats.humidity?.max | number:'1.1-1' }}</td>
+          <td>{{ stats.humidity?.avg | number:'1.1-1' }}</td>
+        </tr>
+        <tr>
+          <td>☀️ Cahaya (%)</td>
+          <td>{{ stats.light?.min }}</td>
+          <td>{{ stats.light?.max }}</td>
+          <td>{{ stats.light?.avg | number:'1.1-1' }}</td>
+        </tr>
+        <tr>
+          <td>🌱 Kel. Tanah (%)</td>
+          <td>{{ stats.soilMoisture?.min }}</td>
+          <td>{{ stats.soilMoisture?.max }}</td>
+          <td>{{ stats.soilMoisture?.avg | number:'1.1-1' }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ── Recent Readings Table ─────────────────────────────── -->
+  <section class="readings-section">
+    <h2>20 Pembacaan Terakhir</h2>
+    <div class="table-wrapper">
+      <table class="readings-table" *ngIf="readings.length > 0; else noReadings">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Device</th>
+            <th>Suhu (°C)</th>
+            <th>Kelembaban (%)</th>
+            <th>Cahaya (%)</th>
+            <th>Kel. Tanah (%)</th>
+            <th>Baterai (V)</th>
+            <th>Waktu</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let r of readings; let i = index">
+            <td>{{ i + 1 }}</td>
+            <td><code>{{ r.device }}</code></td>
+            <td>{{ r.temperature | number:'1.1-1' }}</td>
+            <td>{{ r.humidity    | number:'1.1-1' }}</td>
+            <td>{{ r.light }}</td>
+            <td>{{ r.soilMoisture }}</td>
+            <td>{{ r.battery | number:'1.1-1' }}</td>
+            <td class="ts">{{ formatDate(r.recordedAt) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <ng-template #noReadings>
+        <p class="no-data">Belum ada data tersimpan.</p>
+      </ng-template>
+    </div>
+  </section>
+
+  <footer class="dash-footer">
+    Percobaan 4 · Praktikum Mekatronika dan Robotika · Spring Boot + Angular
+  </footer>
+</div>

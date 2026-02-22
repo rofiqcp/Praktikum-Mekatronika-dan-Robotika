@@ -1,0 +1,9 @@
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-root',
+  template: '<app-dashboard></app-dashboard>',
+})
+export class AppComponent {
+  title = 'Percobaan 4 - Multi-Sensor Dashboard';
+}
