@@ -63,6 +63,7 @@ Setelah menyelesaikan praktikum ini, mahasiswa mampu:
 | 8 | Chassis robot | Akrilik 3mm, 150×120mm | 1 buah | |
 | 9 | Baterai LiPo 2S | 7.4V 2000mAh | 1 buah | |
 | 10 | Kabel IDC 10-pin | Flat cable, 20cm | 1 buah | PCB MAIN ↔ Sensor |
+| 11 | Modul MPU-6050 (GY-521) | IMU 6-DoF, I2C | 1 buah | Modul header pin, terhubung ke pin I2C PCB MAIN (shared bus dengan OLED) |
 
 ### C.2 Peralatan Solder
 
@@ -100,6 +101,29 @@ Setelah menyelesaikan praktikum ini, mahasiswa mampu:
 | 3 | Driver USB ESP32 | CH340 atau CP2102 | Sesuai chip USB-UART di board |
 | 4 | Git (opsional) | Version control kode | https://git-scm.com |
 
+### C.5 Pin Assignment ESP32
+
+| Fungsi | GPIO | Keterangan |
+|--------|------|-----------|
+| SPI CLK (74HC165) | 18 | VSPI CLK |
+| SPI MISO (74HC165) | 19 | VSPI MISO |
+| SPI CS (74HC165) | 5 | Chip Select |
+| Motor Kiri EN (PWM) | 25 | LEDC CH0 |
+| Motor Kiri IN1 | 26 | Arah |
+| Motor Kiri IN2 | 27 | Arah |
+| Motor Kanan EN (PWM) | 32 | LEDC CH1 |
+| Motor Kanan IN1 | 33 | Arah |
+| Motor Kanan IN2 | 14 | Arah |
+| OLED SDA + MPU-6050 SDA | 21 | I2C SDA (shared bus) |
+| OLED SCL + MPU-6050 SCL | 22 | I2C SCL (shared bus) |
+| MPU-6050 INT | 34 | Interrupt (opsional) |
+| Push Button START | 4 | INPUT_PULLUP |
+| Push Button MODE | 15 | INPUT_PULLUP |
+| LED Indikator | 2 | Output |
+| Buzzer | 23 | PWM tone |
+
+> **Catatan:** MPU-6050 dan OLED berbagi bus I2C yang sama karena menggunakan alamat berbeda: OLED = 0x3C, MPU-6050 = 0x68.
+
 ---
 
 ## D. DASAR TEORI SINGKAT
@@ -131,7 +155,23 @@ motor_R = base_speed - output
 
 **Tuning awal yang disarankan:** Kp = 0.15, Ki = 0.0, Kd = 0.8
 
-### D.4 Kontrol Motor dengan LEDC PWM
+### D.4 Sensor IMU MPU-6050
+
+MPU-6050 adalah IMU 6-DoF yang terhubung via I2C (alamat 0x68). Memberikan data:
+- **Accelerometer (ax, ay, az):** akselerasi dalam g (1g = 9.81 m/s²) → menghitung sudut pitch dan roll
+- **Gyroscope (gx, gy, gz):** kecepatan sudut dalam °/s → mendeteksi laju rotasi robot
+
+**Complementary Filter** untuk estimasi sudut stabil:
+```
+angle = 0.98 × (angle + gyro_rate × dt) + 0.02 × accel_angle
+```
+
+**Aplikasi pada Line Follower:**
+- Deteksi ramp: pitch > 10° → kompensasi kecepatan
+- Yaw correction: gz saat lurus → koreksi drift motor
+- Anti-terbalik: pitch/roll > 45° → stop darurat
+
+### D.5 Kontrol Motor dengan LEDC PWM
 
 ESP32 menggunakan hardware LEDC (LED Control) untuk PWM motor:
 ```cpp
@@ -411,6 +451,7 @@ upload_speed = 921600
 lib_deps =
     adafruit/Adafruit SSD1306@^2.5.7
     adafruit/Adafruit GFX Library@^1.11.9
+    electroniccats/MPU6050@^1.3.0
 ```
 4. PlatformIO akan otomatis download library → tunggu selesai
 5. Buat file `include/config.h` dengan semua define pin (lihat Materi.md)
@@ -555,7 +596,226 @@ Tambahkan komponen Kd ke program Percobaan 2:
 
 ---
 
-#### LANGKAH 15: PERCOBAAN 4 – PID Controller Penuh (Opsional/Lanjutan)
+#### LANGKAH 15: PERCOBAAN 4 – MPU-6050: Baca Data IMU
+
+**Estimasi waktu: 20 menit**
+
+Verifikasi komunikasi I2C dan baca data accelerometer + gyroscope:
+
+```cpp
+#include <Wire.h>
+#include <MPU6050.h>
+#include "config.h"
+
+MPU6050 mpu;
+int16_t ax, ay, az, gx, gy, gz;
+float pitch = 0, roll = 0;
+float gz_offset = 0;  // Kalibrasi offset gyro Z
+
+void calibrateGyro() {
+  long sum = 0;
+  for (int i = 0; i < 1000; i++) {
+    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+    sum += gz;
+    delay(1);
+  }
+  gz_offset = sum / 1000.0;
+  Serial.printf("Gyro Z offset: %.2f\n", gz_offset);
+}
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin(PIN_OLED_SDA, PIN_OLED_SCL);
+  mpu.initialize();
+  if (!mpu.testConnection()) {
+    Serial.println("MPU6050 connection FAILED!");
+    while (1);
+  }
+  Serial.println("MPU6050 OK");
+  Serial.println("Kalibrasi gyro... jangan gerakkan robot");
+  delay(1000);
+  calibrateGyro();
+}
+
+void loop() {
+  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+  
+  // Konversi ke satuan fisik
+  float axg = ax / 16384.0;  // ±2g range
+  float ayg = ay / 16384.0;
+  float azg = az / 16384.0;
+  float gzDps = (gz - gz_offset) / 131.0;  // ±250°/s
+  
+  // Hitung sudut dari accelerometer
+  pitch = atan2(ayg, sqrt(axg*axg + azg*azg)) * 180.0 / PI;
+  roll  = atan2(-axg, azg) * 180.0 / PI;
+  
+  Serial.printf("ax:%.2f ay:%.2f az:%.2f | Pitch:%.1f Roll:%.1f | GZ:%.1f\n",
+                axg, ayg, azg, pitch, roll, gzDps);
+  delay(50);
+}
+```
+
+**Data Pengamatan P4 – Kalibrasi Sensor:**
+
+| Kondisi | Pitch (°) | Roll (°) | Yaw Rate (°/s) |
+|---------|---------|---------|---------------|
+| Robot di bidang datar | | | |
+| Robot miring depan 10° | | | |
+| Robot miring depan 20° | | | |
+| Robot miring kanan 10° | | | |
+| Robot berputar kiri (manual) | | | |
+| Robot berputar kanan (manual) | | | |
+
+> **✅ Checkpoint:** MPU-6050 terhubung, data pitch/roll berubah sesuai orientasi robot.
+
+---
+
+#### LANGKAH 16: PERCOBAAN 5 – Complementary Filter
+
+**Estimasi waktu: 20 menit**
+
+Implementasikan complementary filter untuk estimasi sudut yang stabil:
+
+```cpp
+// Tambahkan variabel global
+float angle_comp = 0;
+unsigned long lastTime = 0;
+
+void loop() {
+  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+
+  unsigned long now = micros();
+  float dt = (now - lastTime) / 1000000.0;  // detik
+  lastTime = now;
+
+  float axg = ax / 16384.0;
+  float ayg = ay / 16384.0;
+  float azg = az / 16384.0;
+  float gyDps = (gy - gy_offset) / 131.0;  // Gyro sumbu Y untuk kalkulasi pitch
+  // Catatan: gz (sumbu Z) digunakan untuk yaw rate di Percobaan 6
+
+  // Sudut hanya dari accelerometer
+  float pitch_accel = atan2(ayg, sqrt(axg*axg + azg*azg)) * 180.0 / PI;
+  
+  // Complementary filter
+  float alpha = 0.98;
+  angle_comp = alpha * (angle_comp + gyDps * dt) + (1.0 - alpha) * pitch_accel;
+
+  // Output untuk Serial Plotter: 3 kolom
+  Serial.print(pitch_accel);   Serial.print(",");
+  Serial.print(angle_comp);    Serial.print(",");
+  Serial.println(gyDps);
+  
+  delay(10);
+}
+```
+
+**Tabel Perbandingan Metode Estimasi Sudut:**
+
+| Metode | Error setelah 30 detik diam | Noise saat digetarkan | Delay respons |
+|--------|---------------------------|----------------------|--------------|
+| Hanya Accelerometer | | | |
+| Hanya Integrasikan Gyro | | | |
+| Complementary α=0.90 | | | |
+| Complementary α=0.98 | | | |
+| Complementary α=0.99 | | | |
+
+---
+
+#### LANGKAH 17: PERCOBAAN 6 – Yaw Rate Correction
+
+**Estimasi waktu: 20 menit**
+
+Integrasikan feedback gyroscope Z untuk koreksi drift lurus robot:
+
+```cpp
+// Tambahkan ke program PD (Percobaan 3)
+float gz_filtered = 0;
+const float Kyaw = 0.3;   // Mulai dari nilai kecil
+
+// Di dalam loop, setelah baca sensor garis:
+mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+float gzDps = (gz - gz_offset) / 131.0;
+
+// Low-pass filter untuk gyro Z
+gz_filtered = 0.8 * gz_filtered + 0.2 * gzDps;
+
+// Hitung PID garis
+error = 0 - sensorPosition;
+pidOutput = computePID(error);
+
+// Koreksi yaw: hanya aktif saat lurus (error kecil)
+float yaw_correction = 0;
+if (abs(error) < 10) {
+  yaw_correction = Kyaw * gz_filtered;
+}
+
+int leftSpeed  = BASE_SPEED + (int)(pidOutput + yaw_correction);
+int rightSpeed = BASE_SPEED - (int)(pidOutput + yaw_correction);
+```
+
+**Tabel Tuning Kyaw:**
+
+| Kyaw | Perilaku di Lurus | Perilaku di Tikungan | Evaluasi |
+|------|------------------|---------------------|---------|
+| 0.0 | (baseline, tanpa koreksi) | | |
+| 0.1 | | | |
+| 0.3 | | | |
+| 0.5 | | | |
+| 0.8 | | | |
+| Kyaw optimal: | | | ✅ |
+
+**Pengukuran deviasi dari garis lurus (2 meter):**
+
+| Kondisi | Deviasi max dari garis (mm) |
+|---------|---------------------------|
+| PD tanpa koreksi IMU | |
+| PD + yaw correction (Kyaw optimal) | |
+
+---
+
+#### LANGKAH 18: PERCOBAAN 7 – Ramp Detection dan Speed Compensation
+
+**Estimasi waktu: 20 menit** *(percobaan opsional / lanjutan)*
+
+Tambahkan deteksi kemiringan (ramp) dan kompensasi kecepatan:
+
+```cpp
+// Di dalam loop:
+float axg = ax / 16384.0;
+float ayg = ay / 16384.0;
+float azg = az / 16384.0;
+float pitchDeg = atan2(ayg, sqrt(axg*axg + azg*azg)) * 180.0 / PI;
+
+// Kompensasi kecepatan di ramp
+float rampFactor = cos(pitchDeg * PI / 180.0);  // 1.0 di datar, berkurang di ramp
+rampFactor = constrain(rampFactor, 0.5, 1.0);   // Minimum 50% kecepatan
+
+// Anti-terbalik
+if (abs(pitchDeg) > 45.0 || abs(rollDeg) > 45.0) {
+  motorStop();
+  tone(PIN_BUZZER, 1000, 500);  // Alarm
+  return;
+}
+
+// Terapkan pada kecepatan motor
+leftSpeed  = (int)(leftSpeed  * rampFactor);
+rightSpeed = (int)(rightSpeed * rampFactor);
+```
+
+**Data Pengamatan Ramp:**
+
+| Sudut Ramp (°) | Kecepatan tanpa kompensasi | Kecepatan dengan kompensasi | Tetap di garis? |
+|---------------|--------------------------|---------------------------|----------------|
+| 0° (datar) | | | |
+| 10° | | | |
+| 15° | | | |
+| 20° | | | |
+
+---
+
+#### LANGKAH 19: PERCOBAAN 8 – PID Controller Penuh
 
 **Estimasi waktu: 20 menit (jika waktu cukup)**
 
@@ -608,16 +868,28 @@ Tambahkan komponen Ki ke program Percobaan 3:
 | 11 | | | | |
 | 12 | | | | |
 
-### F.3 Perbandingan Performa Algoritma
+### F.3 Data IMU MPU-6050 (Kalibrasi)
 
-| Algoritma | Kp | Ki | Kd | Waktu Lintasan (s) | Keluar Garis | Evaluasi |
-|----------|----|----|----|--------------------|-------------|---------|
-| Binary | — | — | — | | | |
-| P Controller | | 0 | 0 | | | |
-| PD Controller | | 0 | | | | |
-| PID Controller | | | | | | |
+| Parameter | Nilai |
+|-----------|-------|
+| Gyro Z offset (saat diam) | °/s |
+| Pitch saat datar (setelah kalibrasi) | ° |
+| Roll saat datar (setelah kalibrasi) | ° |
+| Nilai alpha Complementary Filter dipilih | |
+| Drift gyro Z setelah 60 detik diam | ° |
 
-### F.4 Pengamatan Perilaku per Kondisi Track
+### F.4 Perbandingan Performa Algoritma
+
+| Algoritma | Kp | Ki | Kd | Kyaw | Waktu Lintasan (s) | Keluar Garis | Evaluasi |
+|----------|----|----|----|----|-------------------|-------------|---------|
+| Binary | — | — | — | — | | | |
+| P Controller | | 0 | 0 | — | | | |
+| PD Controller | | 0 | | — | | | |
+| PD + Yaw IMU | | 0 | | | | | |
+| PID Controller | | | | — | | | |
+| PID + Ramp IMU | | | | | | | |
+
+### F.5 Pengamatan Perilaku per Kondisi Track
 
 | Kondisi Track | Algoritma Terbaik | Kecepatan Optimal | Catatan |
 |--------------|------------------|------------------|---------|
@@ -656,6 +928,16 @@ Tambahkan komponen Ki ke program Percobaan 3:
    **Jawaban:**
    _______________________________________________
 
+6. **Jelaskan** prinsip Complementary Filter yang Anda implementasikan pada MPU-6050. Mengapa nilai alpha=0.98 umumnya dipilih, dan apa konsekuensi jika alpha terlalu mendekati 1.0?
+
+   **Jawaban:**
+   _______________________________________________
+
+7. **Bandingkan** performa robot di garis lurus antara PD saja vs PD dengan koreksi yaw dari gyroscope. Apa yang dapat Anda simpulkan tentang peran IMU dalam meningkatkan akurasi gerak robot?
+
+   **Jawaban:**
+   _______________________________________________
+
 ---
 
 ## H. KESIMPULAN
@@ -682,8 +964,11 @@ Tuliskan kesimpulan praktikum dalam 5–6 poin:
 **Software:**
 - [ ] Screenshot project PlatformIO (struktur folder + platformio.ini)
 - [ ] Screenshot Serial Monitor saat test sensor (12 sensor terdeteksi)
+- [ ] Screenshot Serial Monitor saat MPU-6050 dibaca (pitch, roll, gz terlihat berubah)
+- [ ] Screenshot Serial Plotter: perbandingan 3 metode estimasi sudut (Percobaan 5)
 - [ ] Screenshot atau rekaman Serial Monitor saat robot berlari dengan P controller
 - [ ] Screenshot atau rekaman Serial Monitor saat robot berlari dengan PD controller
+- [ ] Screenshot atau rekaman Serial Monitor saat robot berlari dengan PD+Yaw IMU
 
 **Grafik:**
 - [ ] Grafik Kp vs Waktu Lintasan (dari tabel tuning Percobaan 2)

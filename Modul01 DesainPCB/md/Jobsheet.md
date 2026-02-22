@@ -73,7 +73,8 @@ Setelah menyelesaikan praktikum ini, mahasiswa mampu:
 | 6 | HC-SR04 (konektor) | — | Header 4-pin |
 | 7 | SG90 (konektor servo) | — | Header 3-pin |
 | 8 | OLED 0.96" (konektor) | — | Header 4-pin |
-| 9 | Push Button 6×6mm | C393942 | Through Hole |
+| 9 | MPU-6050 | C24112 | Module GY-521, I2C addr 0x68 |
+| 10 | Push Button 6×6mm | C393942 | Through Hole |
 
 ### Peralatan Pendukung
 
@@ -254,8 +255,9 @@ Untuk footprint kustom:
 | `MOTOR_IN1` | Arah motor kanan 1 |
 | `SR04_TRIG_F` | Trigger HC-SR04 depan |
 | `SR04_ECHO_F` | Echo HC-SR04 depan |
-| `I2C_SDA` | I2C data bus |
-| `I2C_SCL` | I2C clock bus |
+| `I2C_SDA` | I2C data bus (OLED + MPU-6050) |
+| `I2C_SCL` | I2C clock bus (OLED + MPU-6050) |
+| `MPU_INT` | Interrupt dari MPU-6050 ke ESP32 |
 | `SERVO_1` | PWM servo 1 |
 
 > **Tips:** Buat semua power port dan GND terlebih dahulu, lalu hubungkan ke pin-pin secara sistematis per section (power section → MCU → sensor → output).
@@ -400,6 +402,7 @@ Untuk footprint kustom:
 | U3 (L293D) | | |
 | SW2-SW5 (button) | | |
 | J4 (OLED) | | |
+| J5 (MPU-6050) | | Dekat pin I2C ESP32 |
 
 > **Tips:** Gunakan fitur **Highlight Net** (klik trace/ratsnest) untuk melihat jalur mana yang paling kompleks, lalu prioritaskan placement untuk jalur tersebut.
 

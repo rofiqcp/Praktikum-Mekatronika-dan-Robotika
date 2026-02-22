@@ -50,6 +50,7 @@ Desain PCB menggunakan **EasyEDA** dengan komponen bersumber dari **LCSC Electro
 | HC-SR04 × 3 | Sensor ultrasonik | Level shifting: 5V ECHO → 3.3V |
 | SG90 × 3 | Servo untuk mekanik | Konektor JST 3-pin |
 | OLED 0.96" I2C | Display status | Konektor 4-pin (VCC, GND, SDA, SCL) |
+| MPU-6050 (GY-521) | IMU 6-DoF: accelerometer + gyroscope | I2C 0x68, berbagi bus dengan OLED; pin AD0 ke GND |
 | Push Button × 4 | Input manual | Pull-up eksternal 10kΩ |
 | LED Indikator × 4 | Status power, mode | Resistor seri 100Ω |
 | Buzzer | Peringatan / tone | Transistor NPN (2N2222) sebagai driver |
@@ -60,6 +61,7 @@ Desain PCB menggunakan **EasyEDA** dengan komponen bersumber dari **LCSC Electro
 - Level shifting HC-SR04: pin ECHO (5V output) diturunkan ke 3.3V menggunakan **voltage divider**  
   (R1 = 1kΩ seri, R2 = 2kΩ ke GND → output = 3.3V untuk input ESP32)
 - Konektor motor DC: terminal block 2-pin (kiri/kanan), pastikan rating arus ≥ 3A
+- MPU-6050: dihubungkan ke **bus I2C yang sama dengan OLED** (SDA=GPIO21, SCL=GPIO22). Pin AD0 dihubungkan ke GND → alamat 0x68. OLED menggunakan alamat 0x3C, sehingga tidak konflik. Modul GY-521 sudah memiliki resistor pull-up 4.7kΩ bawaan — jangan tambahkan pull-up kedua di PCB untuk menghindari bus contention. Jika menggunakan chip MPU-6050 bare (bukan modul), tambahkan pull-up 4.7kΩ ke SDA dan SCL.
 - Ground plane: buat Copper Area GND pada layer Bottom
 - Decoupling cap: letakkan ≤ 2 mm dari pin VCC setiap IC
 
@@ -148,12 +150,13 @@ Desain PCB menggunakan **EasyEDA** dengan komponen bersumber dari **LCSC Electro
 | 15 | LED 3mm merah | Indikator | THT | — | 4 | 4.000 |
 | 16 | Buzzer aktif 5V | Alarm | THT | C2696235 | 1 | 5.000 |
 | 17 | OLED 0.96" I2C | Display | Module | — | 1 | 25.000 |
-| 18 | HC-SR04 | Ultrasonik | Module | — | 3 | 45.000 |
-| 19 | SG90 | Servo 9g | — | — | 3 | 45.000 |
-| 20 | Terminal Block 2-pin | Motor | THT | C9900000252 | 2 | 6.000 |
-| 21 | Pin Header 2.54mm | Koneksi antar-board | THT | C9900003044 | 1 paket | 10.000 |
-| 22 | PCB MAIN 120×80 | Custom, JLCPCB | — | — | 5 pcs | 45.000 |
-| **SUBTOTAL PCB MAIN** | | | | | | **~345.000** |
+| 18 | MPU-6050 | IMU 6-DoF (Accel + Gyro) | Module GY-521 | C24112 | 1 | 18.000 |
+| 19 | HC-SR04 | Ultrasonik | Module | — | 3 | 45.000 |
+| 20 | SG90 | Servo 9g | — | — | 3 | 45.000 |
+| 21 | Terminal Block 2-pin | Motor | THT | C9900000252 | 2 | 6.000 |
+| 22 | Pin Header 2.54mm | Koneksi antar-board | THT | C9900003044 | 1 paket | 10.000 |
+| 23 | PCB MAIN 120×80 | Custom, JLCPCB | — | — | 5 pcs | 45.000 |
+| **SUBTOTAL PCB MAIN** | | | | | | **~363.000** |
 
 ### D.2 PCB Sensor Line
 
@@ -188,11 +191,11 @@ Desain PCB menggunakan **EasyEDA** dengan komponen bersumber dari **LCSC Electro
 
 | Komponen | Biaya (Rp) |
 |---------|-----------|
-| PCB MAIN (BOM + PCB) | ~345.000 |
+| PCB MAIN (BOM + PCB) | ~363.000 |
 | PCB Sensor Line (BOM + PCB) | ~109.000 |
 | Sistem & Daya | ~335.000 |
-| **TOTAL PER KELOMPOK** | **~789.000** |
-| **Per Orang (4 orang)** | **~197.250** |
+| **TOTAL PER KELOMPOK** | **~807.000** |
+| **Per Orang (4 orang)** | **~201.750** |
 
 *Harga estimasi, dapat berubah. Cek harga terkini di toko komponen dan JLCPCB saat order.*
 

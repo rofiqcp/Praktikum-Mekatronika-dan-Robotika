@@ -95,8 +95,11 @@ Sensor 9-12 → 74HC165 (U2) → daisy-chain dari U1
 | Motor Kanan PWM | GPIO32 | LEDC PWM |
 | Motor Kanan IN1 | GPIO33 | Arah motor |
 | Motor Kanan IN2 | GPIO14 | Arah motor |
-| OLED SDA | GPIO21 | I2C SDA |
-| OLED SCL | GPIO22 | I2C SCL |
+| OLED SDA | GPIO21 | I2C SDA (bus bersama MPU-6050) |
+| OLED SCL | GPIO22 | I2C SCL (bus bersama MPU-6050) |
+| MPU-6050 SDA | GPIO21 | I2C SDA (bus bersama OLED) |
+| MPU-6050 SCL | GPIO22 | I2C SCL (bus bersama OLED) |
+| MPU-6050 INT | GPIO34 | Interrupt (opsional) |
 | Push Button START | GPIO4 | Input, pull-up |
 | Push Button MODE | GPIO15 | Input, pull-up |
 | LED Indikator | GPIO2 | Output |
@@ -133,7 +136,95 @@ L293D adalah IC motor driver dual H-bridge yang dapat mengontrol 2 motor DC seca
 | Voltage drop tiap H-bridge | ~1.8V – 2V |
 | Internal protection diodes | Tidak ada (perlu eksternal) |
 
-### A.5 Algoritma Kontrol Line Follower
+### A.5 Sensor IMU MPU-6050
+
+#### A.5.1 Pengantar MPU-6050
+
+MPU-6050 adalah IC IMU (Inertial Measurement Unit) 6-DoF (Degree of Freedom) buatan InvenSense yang mengintegrasikan **3-axis gyroscope** dan **3-axis accelerometer** dalam satu chip berukuran 4×4×0.9 mm. Pada robot line follower, MPU-6050 memberikan informasi orientasi dan gerakan yang melengkapi data sensor garis.
+
+| Parameter | Nilai |
+|-----------|-------|
+| Interface | I2C (400 kHz Fast Mode) |
+| Alamat I2C | 0x68 (AD0=LOW) atau 0x69 (AD0=HIGH) |
+| Supply voltage | 2.375V – 3.46V (gunakan 3.3V dari ESP32) |
+| Gyroscope range | ±250 / ±500 / ±1000 / ±2000 °/s |
+| Accelerometer range | ±2g / ±4g / ±8g / ±16g |
+| ADC resolution | 16-bit per axis |
+| Digital Motion Processor (DMP) | Built-in, mampu fusi sensor onboard |
+| Konsumsi arus | 3.8 mA (normal), 5 µA (sleep) |
+| Package | QFN-24 (chip), atau modul GY-521 |
+
+#### A.5.2 Prinsip Kerja Sensor IMU
+
+**Accelerometer:**
+Mengukur akselerasi linear menggunakan prinsip massa-pegas pada skala MEMS. Ketika sensor mengalami akselerasi, massa proof defleksi relatif terhadap frame → perubahan kapasitansi → tegangan → nilai digital.
+
+- Saat diam: membaca gravitasi bumi = ±1g pada sumbu vertikal
+- Saat bergerak: membaca kombinasi akselerasi gerak + gravitasi
+- Rumus sudut dari akselerasi (pitch/roll):
+```
+pitch = atan2(ay, sqrt(ax²+az²)) × (180/π)
+roll  = atan2(-ax, az)           × (180/π)
+```
+
+**Gyroscope:**
+Mengukur kecepatan sudut (angular velocity) dalam °/s menggunakan efek Coriolis pada massa getar MEMS.
+
+- Output: laju perubahan sudut (bukan sudut absolut)
+- Untuk mendapatkan sudut: integrasi terhadap waktu
+```
+angle_gyro += (gyro_rate / 131.0) × dt   // untuk ±250°/s range
+```
+
+- **Kelemahan:** drift (bias) — error terakumulasi seiring waktu
+
+#### A.5.3 Complementary Filter
+
+Untuk mendapatkan estimasi sudut yang akurat, digunakan **complementary filter** yang menggabungkan:
+- Accelerometer: akurat jangka panjang tapi noisy saat bergerak
+- Gyroscope: halus dan cepat tapi drift jangka panjang
+
+```
+alpha = 0.98  // trust factor untuk gyro (0 < alpha < 1)
+
+angle = alpha * (angle + gyro_rate * dt) + (1 - alpha) * accel_angle
+```
+
+**Penjelasan:**
+- `alpha × (angle + gyro_rate × dt)` = prediksi dari integras gyro (98%)
+- `(1-alpha) × accel_angle` = koreksi dari accelerometer (2%)
+- Nilai alpha = 0.98 setara dengan time constant filter 49 ms pada loop 10 ms
+
+#### A.5.4 Aplikasi MPU-6050 pada Line Follower
+
+| Aplikasi | Data Sensor | Manfaat |
+|---------|------------|---------|
+| Deteksi kemiringan (ramp) | Pitch angle dari accelerometer | Sesuaikan kecepatan di tanjakan/turunan |
+| Koreksi yaw (straight correction) | Gyro Z-axis (yaw rate) | Robot tetap lurus tanpa drift |
+| Deteksi getaran / permukaan | Akselerasi X/Y high-frequency | Monitor kualitas lintasan |
+| Anti-terbalik | Roll/pitch >45° → stop | Keselamatan robot |
+| Estimasi kecepatan sudut belok | Gyro Z pada tikungan | Kontrol kecepatan adaptif di belokan |
+| Logging inertial data | Semua 6 axis | Analisis dan machine learning |
+
+#### A.5.5 Koneksi MPU-6050 ke ESP32
+
+MPU-6050 berbagi bus I2C dengan OLED SSD1306 (GPIO21=SDA, GPIO22=SCL):
+
+```
+MPU-6050     ESP32
+VCC    →    3.3V
+GND    →    GND
+SDA    →    GPIO21 (bersama OLED)
+SCL    →    GPIO22 (bersama OLED)
+AD0    →    GND (I2C addr = 0x68)
+INT    →    GPIO34 (interrupt, opsional)
+```
+
+> **Catatan:** OLED SSD1306 menggunakan alamat 0x3C, MPU-6050 menggunakan 0x68. Keduanya bisa aktif bersamaan di bus I2C yang sama karena alamat berbeda.
+
+---
+
+### A.6 Algoritma Kontrol Line Follower
 
 #### A.5.1 Kontrol Binary (On-Off) Sederhana
 
@@ -468,6 +559,7 @@ upload_speed = 921600
 lib_deps =
     adafruit/Adafruit SSD1306@^2.5.7
     adafruit/Adafruit GFX Library@^1.11.9
+    electroniccats/MPU6050@^1.3.0
 ```
 
 #### B.3.2 Library yang Digunakan
@@ -503,9 +595,13 @@ lib_deps =
 #define PIN_MOTOR_R_IN1 33   // Arah 1
 #define PIN_MOTOR_R_IN2 14   // Arah 2
 
-// OLED I2C
+// OLED I2C (berbagi bus dengan MPU-6050)
 #define PIN_OLED_SDA    21
 #define PIN_OLED_SCL    22
+
+// MPU-6050 IMU (I2C, berbagi bus dengan OLED)
+#define MPU6050_ADDR    0x68   // AD0=GND
+#define PIN_MPU_INT     34     // Interrupt (opsional)
 
 // Tombol dan indikator
 #define PIN_BTN_START   4
@@ -934,9 +1030,96 @@ FUNGSI fuzzy_control(error, delta_error):
 AKHIR FUNGSI
 ```
 
+### C.6 Pseudo Code MPU-6050 Complementary Filter
+
+```
+INISIALISASI:
+  I2C_begin(SDA=21, SCL=22)
+  MPU6050_init(addr=0x68)
+  kalibrasi_gyro_offset()   // Rata-rata 1000 sample saat diam
+  sudut_pitch = 0, sudut_roll = 0, sudut_yaw_rate = 0
+
+FUNGSI baca_mpu():
+  data_raw = I2C_read_14_bytes(0x68)  // Accel(6) + Temp(2) + Gyro(6)
+  
+  ax = data_raw[0..1] / 16384.0   // Skala ±2g
+  ay = data_raw[2..3] / 16384.0
+  az = data_raw[4..5] / 16384.0
+  
+  gx = (data_raw[8..9]  - offset_gx) / 131.0   // Skala ±250°/s
+  gy = (data_raw[10..11] - offset_gy) / 131.0
+  gz = (data_raw[12..13] - offset_gz) / 131.0
+  
+  // Sudut dari accelerometer
+  pitch_accel = atan2(ay, sqrt(ax²+az²)) × (180/π)
+  roll_accel  = atan2(-ax, az) × (180/π)
+  
+  // Complementary filter
+  dt = waktu_sekarang - waktu_sebelumnya  // detik
+  sudut_pitch = 0.98 × (sudut_pitch + gy × dt) + 0.02 × pitch_accel
+  sudut_roll  = 0.98 × (sudut_roll  + gx × dt) + 0.02 × roll_accel
+  sudut_yaw_rate = gz  // Hanya laju, tidak ada referensi absolut
+  
+  KEMBALIKAN (sudut_pitch, sudut_roll, sudut_yaw_rate)
+
+AKHIR FUNGSI
+```
+
+**Penjelasan:**
+- `baca_14_bytes` membaca akselerometer, temperatur, dan gyroscope sekaligus dari register 0x3B (burst read)
+- Kalibrasi offset dilakukan satu kali di awal: rata-rata bacaan saat robot diam
+- Complementary filter: 98% percaya gyro (cepat, halus), 2% percaya accelerometer (koreksi drift)
+
+### C.7 Pseudo Code Yaw Rate Correction
+
+```
+FUNGSI kontrol_dengan_imu():
+  // Baca sensor garis
+  posisi_garis = hitung_posisi(baca_sensor())
+  
+  // Baca IMU
+  (pitch, roll, yaw_rate) = baca_mpu()
+  
+  // Deteksi kemiringan (ramp)
+  JIKA abs(pitch) > 15:
+    // Robot di tanjakan/turunan
+    faktor_kecepatan = cos(pitch × π/180)  // Kurangi kecepatan
+  LAINNYA:
+    faktor_kecepatan = 1.0
+  AKHIR JIKA
+  
+  // PID garis
+  error_garis = 0 - posisi_garis
+  output_pid  = hitung_PID(error_garis)
+  
+  // Koreksi yaw: jika robot berputar sendiri tanpa belokan garis → koreksi
+  // Hanya aktif ketika garis lurus (error kecil)
+  JIKA abs(error_garis) < 10:
+    Kyaw = 0.5
+    koreksi_yaw = Kyaw × yaw_rate
+  LAINNYA:
+    koreksi_yaw = 0
+  AKHIR JIKA
+  
+  // Gabungkan
+  motor_kiri  = (kecepatan_base + output_pid + koreksi_yaw) × faktor_kecepatan
+  motor_kanan = (kecepatan_base - output_pid - koreksi_yaw) × faktor_kecepatan
+  
+  clamp(motor_kiri,  MIN_SPEED, MAX_SPEED)
+  clamp(motor_kanan, MIN_SPEED, MAX_SPEED)
+  gerakkan_motor(motor_kiri, motor_kanan)
+
+AKHIR FUNGSI
+```
+
+**Penjelasan:**
+- Ketika robot di garis lurus (error kecil), gyroscope Z (yaw rate) mendeteksi rotasi tak terduga (slip, angin, permukaan tidak rata) → koreksi aktif.
+- Di tikungan (error besar), koreksi yaw dinonaktifkan agar tidak mengganggu kontrol PID garis.
+- `cos(pitch)` memberikan faktor kecepatan: pitch=0° → faktor=1.0; pitch=30° → faktor=0.866.
+
 ---
 
-## D. REFERENSI
+
 
 ### D.1 Jurnal dan Paper (30 Referensi)
 

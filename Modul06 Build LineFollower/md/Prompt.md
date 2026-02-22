@@ -288,7 +288,77 @@ Jelaskan prosedur testing mekanik robot line follower sebelum diprogram, untuk m
 
 ---
 
-## BAGIAN 5: PLATFORMIO DAN SETUP PROGRAM (Slide 18–21)
+---
+
+## BAGIAN 5b: SENSOR IMU MPU-6050 (Slide 18b–18e)
+
+### Slide 18b – Pengenalan MPU-6050 dan Prinsip Kerja
+
+**Prompt:**
+```
+Jelaskan sensor IMU MPU-6050 yang terpasang pada robot line follower ESP32, untuk mahasiswa Teknologi Rekayasa Otomasi yang baru mengenal sensor inersial. Sertakan:
+- Definisi IMU: apa itu, mengapa disebut 6-DoF (3 accelerometer + 3 gyroscope)
+- Prinsip MEMS: mengapa chip sekecil 4×4mm bisa mengukur percepatan dan rotasi
+- Tabel spesifikasi: range gyro (±250 s.d. ±2000 °/s), range accel (±2 s.d. ±16g), ADC 16-bit, I2C 400kHz
+- Register penting: WHO_AM_I (0x75), GYRO_CONFIG, ACCEL_CONFIG, register data 0x3B-0x48
+- Koneksi ke ESP32: I2C bus bersama dengan OLED (GPIO21 SDA, GPIO22 SCL), AD0=GND → alamat 0x68
+- Mengapa MPU-6050 ditambahkan ke line follower: koreksi yaw, deteksi ramp, stabilitas gerak
+- Panjang: 160–180 kata
+```
+
+---
+
+### Slide 18c – Accelerometer: Kalkulasi Sudut Pitch dan Roll
+
+**Prompt:**
+```
+Jelaskan cara menghitung sudut pitch dan roll dari data raw accelerometer MPU-6050, dengan derivasi matematis yang jelas untuk mahasiswa teknik. Sertakan:
+- Konsep: gravitasi bumi (1g = 9.81 m/s²) terproyeksi ke 3 sumbu saat sensor miring
+- Rumus pitch: pitch = atan2(ay, sqrt(ax² + az²)) × (180/π)
+- Rumus roll: roll = atan2(-ax, az) × (180/π)
+- Contoh kalkulasi: robot miring 30° ke depan → ax=0.5g, ay=0, az=0.866g → pitch = 30°
+- Keterbatasan: noisy saat robot bergerak (acceleration motion distorts gravity vector)
+- Skala konversi raw ke g: ±2g range → 1g = 16384 LSB
+- Aplikasi pada line follower: deteksi ramp (pitch > 10°), anti-terbalik (roll > 45° → stop)
+- Panjang: 150–170 kata
+```
+
+---
+
+### Slide 18d – Gyroscope dan Complementary Filter
+
+**Prompt:**
+```
+Jelaskan cara kerja gyroscope MPU-6050 dan implementasi Complementary Filter untuk estimasi sudut yang akurat pada robot line follower. Sertakan:
+- Gyroscope output: angular rate (°/s), bukan sudut absolut → perlu integrasi
+- Masalah drift: integrasi error kecil terakumulasi seiring waktu (contoh: 0.1°/s drift = 6°/menit)
+- Accelerometer: akurat jangka panjang tapi noisy saat gerak
+- Complementary Filter: solusi gabungan high-pass gyro + low-pass accelerometer
+- Rumus: angle = α × (angle + gyro_rate × dt) + (1-α) × accel_angle, dengan α = 0.98
+- Time constant filter: τ = α×dt/(1-α) = 0.98×0.01/(0.02) = 0.49 detik
+- Perbandingan dengan Kalman Filter: keunggulan complementary (lebih cepat, lebih sederhana) untuk aplikasi real-time
+- Implementasi pada ESP32: dt menggunakan micros() untuk presisi
+- Panjang: 160–180 kata
+```
+
+---
+
+### Slide 18e – Integrasi MPU-6050 ke Kontrol Line Follower
+
+**Prompt:**
+```
+Jelaskan cara mengintegrasikan data MPU-6050 ke dalam algoritma kontrol PID line follower untuk meningkatkan performa, dengan contoh konkret. Sertakan:
+- Aplikasi 1 – Yaw correction: saat garis lurus (error kecil), gunakan gyro Z untuk mengoreksi rotasi tak terduga (slip ban, motor tidak balance) → tambahkan Kyaw × yaw_rate ke output motor
+- Aplikasi 2 – Ramp compensation: pitch angle dari accelerometer → kalikan kecepatan base dengan cos(pitch) untuk mempertahankan kecepatan ground yang konstan
+- Aplikasi 3 – Anti-overturn: jika roll > 45° atau pitch > 60° → stop motor (keselamatan)
+- Aplikasi 4 – Smart speed reduction: deteksi getaran tinggi (standar deviasi akselerasi) → permukaan kasar → turunkan kecepatan
+- Urutan pemrosesan dalam main loop: baca sensor garis → baca IMU → hitung PID garis → tambahkan koreksi IMU → aktuasi motor
+- Panjang: 160–180 kata
+```
+
+---
+
+## BAGIAN 5: PLATFORMIO DAN SETUP PROGRAM (Slide 19–22)
 
 ### Slide 18 – Pengenalan PlatformIO
 
@@ -322,17 +392,19 @@ Jelaskan struktur project PlatformIO untuk robot line follower ESP32 dan konfigu
 
 ---
 
-### Slide 20 – Library ESP32 untuk Line Follower
+### Slide 21 – Library ESP32 untuk Line Follower
 
 **Prompt:**
 ```
 Jelaskan library-library yang digunakan dalam project line follower ESP32 dengan PlatformIO. Sertakan:
 - SPI.h: komunikasi dengan 74HC165 - SPISettings, beginTransaction, endTransaction, transfer
-- Wire.h / I2C: komunikasi dengan OLED SSD1306
+- Wire.h / I2C: komunikasi dengan OLED SSD1306 dan MPU-6050 di bus yang sama
 - Adafruit SSD1306 dan GFX: cara install via platformio.ini lib_deps, fungsi utama (begin, clearDisplay, print, display)
+- ElectronicCats/MPU6050: cara install, MPU6050.initialize(), getMotion6() untuk baca 6-axis sekaligus
+- Perbedaan ElectronicCats/MPU6050 vs Wire manual: library mengabstraksi register-level I2C
 - ESP32 built-in: ledcSetup, ledcAttachPin, ledcWrite untuk hardware PWM motor
 - Perbedaan delay() vs millis() untuk multitasking: mengapa millis() lebih baik untuk real-time control
-- FreeRTOS ESP32: overview xTaskCreate untuk multi-task (opsional, untuk sensor task dan control task terpisah)
+- FreeRTOS ESP32: xTaskCreatePinnedToCore untuk pin IMU task ke Core 0 dan control task ke Core 1
 - Panjang: 160–180 kata
 ```
 
@@ -561,17 +633,88 @@ Buatkan deskripsi percobaan 5 implementasi PID Controller penuh dengan tuning si
 
 ---
 
-### Slide 34 – Percobaan 6: Speed Profiling (Adaptif)
+### Slide 35 – Percobaan 6: Integrasi MPU-6050 – Baca Data IMU
 
 **Prompt:**
 ```
-Buatkan deskripsi percobaan 6 implementasi speed profiling adaptif - robot mempercepat di lurus dan melambat di tikungan secara otomatis. Sertakan:
+Buatkan deskripsi percobaan 6 membaca dan memvisualisasikan data raw MPU-6050 (accelerometer + gyroscope) pada robot line follower ESP32. Sertakan:
+- Tujuan: memahami cara kerja IMU, membaca data 6-axis via I2C, kalibrasi offset gyroscope
+- Setup kode: Wire.begin(21, 22), inisialisasi MPU6050 library, cek komunikasi (WHO_AM_I register)
+- Prosedur kalibrasi offset: robot diam di permukaan rata, rata-rata 1000 sampel → simpan offset gyro
+- Format Serial output yang disarankan: "ax,ay,az,gx,gy,gz,pitch,roll,yaw_rate"
+- Visualisasi dengan Serial Plotter PlatformIO: plot pitch dan roll real-time saat robot dimiringkan
+- Percobaan: miringkan robot ke depan, belakang, kiri, kanan → verifikasi nilai pitch/roll
+- OLED display: baris 1=pitch, baris 2=roll, baris 3=yaw_rate
+- Pertanyaan: mengapa nilai pitch tidak nol saat robot di bidang datar? Bagaimana mengatasinya?
+- Panjang: 150–170 kata
+```
+
+---
+
+### Slide 36 – Percobaan 7: Complementary Filter – Estimasi Sudut
+
+**Prompt:**
+```
+Buatkan deskripsi percobaan 7 implementasi Complementary Filter untuk estimasi sudut yang stabil dari MPU-6050. Sertakan:
+- Tujuan: memahami keterbatasan accelerometer dan gyroscope secara individual, mengimplementasikan fusion
+- Eksperimen 1: hanya accelerometer → amati noise saat robot bergerak (getarkan robot)
+- Eksperimen 2: hanya integrasikan gyro → amati drift dalam 60 detik (berapa derajat error?)
+- Eksperimen 3: complementary filter α=0.98 → bandingkan dengan kedua di atas
+- Tuning alpha: eksperimen α = 0.90, 0.95, 0.98, 0.99 → trade-off responsiveness vs stability
+- Plot ketiga metode secara bersamaan via Serial Plotter (3 baris)
+- Tabel hasil: drift setelah 60 detik untuk setiap metode
+- Referensi: Mahony et al. (2008), Madgwick (2010) sebagai alternatif filter
+- Panjang: 150–170 kata
+```
+
+---
+
+### Slide 37 – Percobaan 8: Ramp Detection dan Speed Compensation
+
+**Prompt:**
+```
+Buatkan deskripsi percobaan 8 menggunakan data pitch MPU-6050 untuk deteksi ramp dan kompensasi kecepatan otomatis. Sertakan:
+- Tujuan: memprogram robot untuk mempertahankan kecepatan efektif di tanjakan dan turunan
+- Setup lintasan: buat ramp dengan sudut 10° dan 20° dari akrilik atau buku
+- Rumus kompensasi: base_speed_effective = base_speed × cos(pitch_rad) untuk tanjakan
+  - Untuk turunan: tambahkan pengereman (brake) jika pitch < -5°
+- Ambang deteksi: |pitch| > 5° = on ramp, |pitch| > 15° = steep ramp → peringatan buzzer
+- Percobaan tanpa kompensasi vs dengan kompensasi: catat kecepatan aktual dan keluar garis
+- Tantangan: sensor garis bisa terangkat dari permukaan di ramp tajam → perlu mount adjustable
+- Panjang: 150–170 kata
+```
+
+---
+
+### Slide 38 – Percobaan 9: Yaw Rate Correction (Gyro Feedback)
+
+**Prompt:**
+```
+Buatkan deskripsi percobaan 9 menggunakan gyroscope Z-axis (yaw rate) sebagai feedback tambahan untuk mempertahankan robot tetap lurus pada bagian track lurus. Sertakan:
+- Tujuan: mendemonstrasikan multi-sensor fusion, mengatasi motor drift dan slip ban
+- Konsep: saat robot di garis lurus dan error sensor kecil → aktifkan koreksi yaw
+  - koreksi = Kyaw × gz_filtered
+  - motor_kiri  += koreksi; motor_kanan -= koreksi
+- Tuning Kyaw: mulai 0.1, naikkan bertahap → hati-hati: terlalu besar akan mengganggu kontrol garis
+- Aktivasi kondisional: hanya aktif jika |error_sensor| < threshold (misal 10)
+- Low-pass filter pada gz: untuk mengurangi noise → alpha_filter = 0.8
+- Perbandingan: track lurus panjang 2 meter, PD biasa vs PD + yaw correction → ukur deviasi dari garis
+- Panjang: 150–170 kata
+```
+
+---
+
+### Slide 39 – Percobaan 10: Speed Profiling Adaptif (dengan IMU)
+
+**Prompt:**
+```
+Buatkan deskripsi percobaan 10 implementasi speed profiling adaptif - robot mempercepat di lurus dan melambat di tikungan secara otomatis. Sertakan:
 - Konsep: kecepatan base tidak tetap, tapi bergantung pada absolut nilai error
 - Rumus: base_speed = MAX_SPEED - (|error| × speed_reduction_factor)
 - Implementasi: map(abs(error), 0, MAX_ERROR, MAX_SPEED, MIN_SPEED)
 - Tuning speed_reduction_factor: terlalu besar → terlalu lambat di tikungan
 - Manfaat: waktu lintasan total berkurang signifikan dibanding kecepatan konstan
-- Pengukuran: catat waktu lintasan Percobaan 5 (konstan) vs Percobaan 6 (adaptif)
+- Pengukuran: catat waktu lintasan Percobaan 9 (yaw correction) vs Percobaan 10 (speed profiling adaptif + IMU)
 - Lintasan: track dengan variasi panjang straight dan radius curve yang berbeda
 - Panjang: 150–170 kata
 ```
