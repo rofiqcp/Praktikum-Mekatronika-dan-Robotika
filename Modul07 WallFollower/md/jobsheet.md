@@ -71,6 +71,7 @@ Setelah menyelesaikan praktikum ini, mahasiswa mampu:
 | 14 | **Kabel jumper** | Male-to-male, M-to-F | 1 set | Wiring |
 | 15 | **PCB Chassis Robot** | Dari Modul 01 (jika ada) | 1 | Body robot |
 | 16 | **Roda + Caster Ball** | Ø65mm | 2+1 | Roda + penyeimbang |
+| 17 | **Modul MPU-6050** | GY-521, 3.3V/5V toleran | 1 | IMU: Gyro + Accel |
 
 ### C.2 Perangkat Lunak
 
@@ -89,9 +90,13 @@ Setelah menyelesaikan praktikum ini, mahasiswa mampu:
 | TRIG_L | GPIO 5 | HC-SR04 Kiri - TRIG | Output |
 | ECHO_L | GPIO 18 | HC-SR04 Kiri - ECHO | Input (via voltage divider) |
 | TRIG_F | GPIO 19 | HC-SR04 Depan - TRIG | Output |
-| ECHO_F | GPIO 21 | HC-SR04 Depan - ECHO | Input (via voltage divider) |
-| TRIG_R | GPIO 22 | HC-SR04 Kanan - TRIG | Output |
-| ECHO_R | GPIO 23 | HC-SR04 Kanan - ECHO | Input (via voltage divider) |
+
+| TRIG_R | GPIO 17 | HC-SR04 Kanan – TRIG | Output (dipindah dari GPIO22 untuk MPU_SCL) |
+| ECHO_F | GPIO 39 | HC-SR04 Depan – ECHO | Input-only GPIO, via voltage divider |
+| ECHO_R | GPIO 23 | HC-SR04 Kanan – ECHO | Input (via voltage divider) |
+| MPU_SDA | GPIO 21 | MPU-6050 SDA | I2C Data (bebas konflik: ECHO_F dipindah ke GPIO39) |
+| MPU_SCL | GPIO 22 | MPU-6050 SCL | I2C Clock (bebas konflik: TRIG_R dipindah ke GPIO17) |
+| MPU_INT | GPIO 4 | MPU-6050 Interrupt | Input (opsional) |
 | IR_LL | GPIO 34 | Sensor IR Line Kiri-Luar | Input (ADC1) |
 | IR_LR | GPIO 35 | Sensor IR Line Kiri-Dalam | Input (ADC1) |
 | IR_RL | GPIO 32 | Sensor IR Line Kanan-Dalam | Input (ADC1) |
@@ -105,12 +110,15 @@ Setelah menyelesaikan praktikum ini, mahasiswa mampu:
 | LED_R | GPIO 2 | LED Merah (mode stop) | Output |
 | LED_G | GPIO 4 | LED Hijau (line mode) | Output |
 | LED_B | GPIO 16 | LED Biru (wall kiri) | Output |
-| LED_Y | GPIO 17 | LED Kuning (wall kanan) | Output |
+| LED_Y | – | Dihapus – GPIO 17 digunakan untuk TRIG_R | – |
 | BUZZER | GPIO 15 | Buzzer aktif | Output |
 | BTN_START | GPIO 0 | Tombol Start | Input Pull-up |
 | BTN_STOP | GPIO 36 | Tombol Stop | Input |
 
-> **⚠️ PERHATIAN:** Pin ECHO HC-SR04 mengeluarkan tegangan 5V. ESP32 maksimal 3.3V. WAJIB menggunakan voltage divider (1kΩ + 2kΩ) atau level shifter.
+> **⚠️ PERHATIAN WIRING:**
+> 1. Pin ECHO HC-SR04 mengeluarkan tegangan 5V. ESP32 maksimal 3.3V. **WAJIB** voltage divider (1kΩ + 2kΩ) atau level shifter.
+> 2. GPIO36 (BTN_STOP) tidak memiliki pull-up internal. **Pasang resistor 10kΩ pull-down ke GND** agar pembacaan HIGH saat tombol ditekan stabil.
+> ESP32 maksimal 3.3V. WAJIB menggunakan voltage divider (1kΩ + 2kΩ) atau level shifter.
 
 ---
 
@@ -125,8 +133,8 @@ Setelah menyelesaikan praktikum ini, mahasiswa mampu:
 **Prosedur:**
 
 1. Pasang satu sensor HC-SR04 pada breadboard
-2. Hubungkan ke ESP32 sesuai pin assignment (TRIG_F = GPIO 19, ECHO_F = GPIO 21)
-3. Pasang voltage divider pada pin ECHO (1kΩ ke ECHO, sambungkan titik tengah ke GPIO 21, 2kΩ ke GND)
+2. Hubungkan ke ESP32 sesuai pin assignment (TRIG_F = GPIO 19, ECHO_F = **GPIO 39**)
+3. Pasang voltage divider pada pin ECHO (1kΩ ke ECHO, sambungkan titik tengah ke **GPIO 39**, 2kΩ ke GND)
 4. Upload program berikut menggunakan PlatformIO:
 
 ```cpp
@@ -134,7 +142,7 @@ Setelah menyelesaikan praktikum ini, mahasiswa mampu:
 #include <Arduino.h>
 
 #define TRIG_PIN 19
-#define ECHO_PIN 21
+#define ECHO_PIN 39
 
 float readDistance() {
     digitalWrite(TRIG_PIN, LOW);
@@ -208,7 +216,7 @@ void loop() {
 #include <Arduino.h>
 
 #define TRIG_PIN 19
-#define ECHO_PIN 21
+#define ECHO_PIN 39
 #define THRESHOLD_CM 20.0   // ← ubah-ubah nilai ini
 
 float readDistance() {
@@ -468,6 +476,171 @@ Path Left-Hand Rule: (gambar dengan tangan)
 
 ---
 
+### D.11 PERCOBAAN 11: Kalibrasi dan Pembacaan MPU-6050
+
+**Tujuan:** Memahami cara kerja sensor IMU MPU-6050 dan melakukan kalibrasi offset.
+
+**Durasi:** 25 menit
+
+**Prosedur:**
+
+1. Hubungkan MPU-6050 ke ESP32: VCC→3.3V, GND→GND, SDA→GPIO21, SCL→GPIO22
+2. Tambahkan library ke `platformio.ini`:
+
+```ini
+lib_deps = 
+    electroniccats/MPU6050@^1.3.0
+```
+
+3. Upload program kalibrasi dari: `program/percobaan11_mpu6050_kalibasi/`
+
+```cpp
+// Percobaan 11: Kalibrasi dan Pembacaan MPU-6050
+#include <Arduino.h>
+#include <Wire.h>
+#include <MPU6050.h>
+
+MPU6050 mpu;
+
+void setup() {
+    Serial.begin(115200);
+    Wire.begin(21, 22);
+    mpu.initialize();
+    if (!mpu.testConnection()) {
+        Serial.println("ERROR: MPU6050 tidak terdeteksi!");
+        while(1);
+    }
+    Serial.println("MPU6050 OK!");
+    Serial.println("accelX,accelY,accelZ,gyroX,gyroY,gyroZ,temp");
+}
+
+void loop() {
+    int16_t ax, ay, az, gx, gy, gz;
+    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+    
+    // Konversi ke satuan fisik
+    float Ax = ax / 16384.0;
+    float Ay = ay / 16384.0;
+    float Az = az / 16384.0;
+    float Gx = gx / 131.0;
+    float Gy = gy / 131.0;
+    float Gz = gz / 131.0;
+    float T  = mpu.getTemperature() / 340.0 + 36.53;
+    
+    Serial.print(Ax,3); Serial.print(",");
+    Serial.print(Ay,3); Serial.print(",");
+    Serial.print(Az,3); Serial.print(",");
+    Serial.print(Gx,3); Serial.print(",");
+    Serial.print(Gy,3); Serial.print(",");
+    Serial.print(Gz,3); Serial.print(",");
+    Serial.println(T,2);
+    delay(100);
+}
+```
+
+4. Letakkan robot **diam di permukaan datar**. Catat nilai baseline selama 5 detik.
+5. Miringkan robot 30° ke kiri, 30° ke kanan, 30° ke depan, 30° ke belakang. Catat perubahan nilai.
+6. Putar robot 90° ke kanan secara manual. Amati nilai GyroZ.
+
+**Tabel Data Percobaan 11:**
+
+| Posisi | AccelX (g) | AccelY (g) | AccelZ (g) | GyroX (°/s) | GyroY (°/s) | GyroZ (°/s) |
+|--------|-----------|-----------|-----------|------------|------------|------------|
+| Diam rata | | | | | | |
+| Miring kiri 30° | | | | | | |
+| Miring kanan 30° | | | | | | |
+| Miring depan 30° | | | | | | |
+| Putar kanan 90° | | | | | | |
+
+**Pertanyaan Analisis P11:**
+- a. Saat robot diam, nilai AccelZ seharusnya ≈ +1.0g. Mengapa?
+- b. Saat robot miring 30° ke kiri, nilai AccelX berubah bagaimana?
+- c. Berapa nilai GyroZ saat robot diputar 90° dalam 1 detik?
+
+---
+
+### D.12 PERCOBAAN 12: Gyro-Assisted Straight Movement & 90° Turn
+
+**Tujuan:** Menggunakan gyroscope untuk menjaga robot berjalan lurus dan berbelok tepat 90°.
+
+**Durasi:** 35 menit
+
+**Prosedur:**
+
+1. Upload program dari: `program/percobaan12_gyro_assist/`
+2. **Bagian A – Gerak Lurus:**
+   - Jalankan robot maju 1 meter **tanpa** koreksi gyro. Ukur penyimpangan arah.
+   - Jalankan robot maju 1 meter **dengan** koreksi gyro (Kp_heading=2.0). Ukur penyimpangan.
+
+**Tabel Perbandingan Gerak Lurus:**
+
+| Mode | Jarak Tempuh | Penyimpangan Arah | Penyimpangan Lateral |
+|------|-------------|------------------|---------------------|
+| Tanpa Gyro | 100 cm | ° | cm |
+| Dengan Gyro (Kp=1.0) | 100 cm | ° | cm |
+| Dengan Gyro (Kp=2.0) | 100 cm | ° | cm |
+| Dengan Gyro (Kp=4.0) | 100 cm | ° | cm |
+
+3. **Bagian B – Belokan Presisi:**
+   - Perintahkan robot berbelok 90° ke kanan menggunakan timer (delay 500ms)
+   - Perintahkan robot berbelok 90° ke kanan menggunakan gyro (berhenti di 90°)
+   - Ukur sudut aktual dengan busur derajat
+
+**Tabel Akurasi Belokan 90°:**
+
+| Metode | Target (°) | Aktual Percobaan 1 (°) | Aktual Percobaan 2 (°) | Aktual Percobaan 3 (°) | Rata-rata Error (°) |
+|--------|-----------|----------------------|----------------------|----------------------|--------------------|
+| Timer-based | 90 | | | | |
+| Gyro-based | 90 | | | | |
+
+**Pertanyaan Analisis P12:**
+- a. Berapa persen peningkatan akurasi belokan dengan metode gyro dibanding timer?
+- b. Apa yang menyebabkan masih ada error pada metode gyro?
+
+---
+
+### D.13 PERCOBAAN 13: Impact Detection & Tilt Safety dengan Accelerometer
+
+**Tujuan:** Menggunakan accelerometer untuk deteksi benturan dan kondisi berbahaya (kemiringan).
+
+**Durasi:** 25 menit
+
+**Prosedur:**
+
+1. Upload program dari: `program/percobaan13_imu_safety/`
+2. **Bagian A – Impact Detection:**
+   - Jalankan robot wall follower → biarkan menabrak dinding dengan kecepatan rendah
+   - Amati apakah sistem mendeteksi benturan dan berhenti otomatis
+   - Ubah threshold impact: 1.5g, 2.0g, 2.5g, 3.0g → catat mana yang optimal
+
+**Tabel Uji Impact Detection:**
+
+| Threshold (g) | Terdeteksi saat Benturan? | False Positive saat Jalan Normal? | Evaluasi |
+|--------------|--------------------------|----------------------------------|---------|
+| 1.5 | | | |
+| 2.0 | | | |
+| 2.5 | | | |
+| 3.0 | | | |
+
+3. **Bagian B – Tilt Safety:**
+   - Jalankan robot → angkat salah satu sisi (simulasi permukaan miring / terguling)
+   - Amati apakah robot berhenti otomatis saat kemiringan > 30°
+
+**Tabel Uji Tilt Safety:**
+
+| Sudut Kemiringan | Motor Berhenti? | Waktu Deteksi (ms) |
+|-----------------|----------------|-------------------|
+| 15° | | |
+| 20° | | |
+| 30° | | |
+| 45° | | |
+
+**Pertanyaan Analisis P13:**
+- a. Mengapa threshold impact terlalu rendah (1.5g) menghasilkan banyak false positive?
+- b. Bagaimana accelerometer dapat membedakan benturan dengan guncangan jalan?
+
+---
+
 ## E. ANALISIS DAN DISKUSI
 
 ### E.1 Analisis Kualitas Sensor (Percobaan 1-2)
@@ -521,6 +694,34 @@ Timeline mode:
 
 (Isi dengan data aktual dari log percobaan)
 
+### E.5 Analisis Performa MPU-6050 (Percobaan 11-13)
+
+Hitung **angular drift** gyroscope selama 60 detik:
+
+```
+Angular Drift = Σ (GyroZ × dt)   saat robot DIAM selama 60 detik
+Drift per menit = nilai total (idealnya mendekati 0°)
+```
+
+| Metrik IMU | Nilai |
+|-----------|-------|
+| Angular drift gyro Z per menit (°/min) | |
+| Akurasi belokan 90° (timer) – rata-rata error (°) | |
+| Akurasi belokan 90° (gyro) – rata-rata error (°) | |
+| Threshold impact optimal (g) | |
+| Waktu deteksi tilt rata-rata (ms) | |
+
+### E.6 Perbandingan Sistem Dengan dan Tanpa IMU
+
+| Aspek | Tanpa MPU-6050 | Dengan MPU-6050 |
+|-------|---------------|----------------|
+| Kelurusan gerak maju (deviasi per meter) | | |
+| Akurasi belokan 90° (error °) | | |
+| Deteksi benturan | Tidak ada | Ada |
+| Respons permukaan miring | Tidak ada | Ada |
+| Kompleksitas kode | Lebih sederhana | Lebih kompleks |
+| Konsumsi daya tambahan | – | ~4 mA |
+
 ---
 
 ## F. KESIMPULAN
@@ -534,6 +735,8 @@ Isi tabel kesimpulan berdasarkan hasil percobaan:
 | 3 | Mode switching otomatis berhasil dalam semua skenario uji | | |
 | 4 | Parameter dapat diubah real-time via WiFi tanpa restart | | |
 | 5 | Robot berhasil mengatasi semua gangguan pada Percobaan 10 | | |
+| 6 | Gyroscope meningkatkan akurasi belokan 90° secara signifikan | | |
+| 7 | Accelerometer berhasil mendeteksi benturan dan kemiringan berbahaya | | |
 
 **Kesimpulan Narasi:**
 
@@ -549,6 +752,8 @@ Isi tabel kesimpulan berdasarkan hasil percobaan:
 4. Espressif Systems. (2024). *ESP32 Technical Reference Manual*. https://www.espressif.com/sites/default/files/documentation/esp32_technical_reference_manual_en.pdf
 5. PlatformIO. (2024). *PlatformIO Documentation*. https://docs.platformio.org/en/latest/
 6. ESPAsyncWebServer. (2024). *ESPAsyncWebServer Library Documentation*. https://github.com/me-no-dev/ESPAsyncWebServer
+7. InvenSense. (2013). *MPU-6050 Product Specification Rev. 3.4*. https://invensense.tdk.com/wp-content/uploads/2015/02/MPU-6000-Datasheet1.pdf
+8. ElectronicCats. (2024). *MPU6050 Arduino Library*. https://github.com/ElectronicCats/mpu6050
 
 ---
 
@@ -557,6 +762,7 @@ Isi tabel kesimpulan berdasarkan hasil percobaan:
 ### H.1 Checklist Komponen (diisi sebelum praktikum dimulai)
 
 - [ ] ESP32 DevKit V1 terpasang dengan baik di breadboard
+- [ ] MPU-6050 terhubung via I2C (SDA=21, SCL=22) dan alamat terdeteksi (0x68)
 - [ ] 3× HC-SR04 terhubung dengan voltage divider yang benar
 - [ ] L298N terhubung ke motor dan ESP32
 - [ ] 2× Motor DC terhubung ke L298N output

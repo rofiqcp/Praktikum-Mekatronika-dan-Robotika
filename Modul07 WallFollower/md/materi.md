@@ -14,14 +14,15 @@
 1. [Pendahuluan – Konsep Wall Follower](#1-pendahuluan--konsep-wall-follower)
 2. [Sensor Ultrasonik HC-SR04](#2-sensor-ultrasonik-hc-sr04)
 3. [Sensor Inframerah (IR) untuk Wall Detection](#3-sensor-inframerah-ir-untuk-wall-detection)
-4. [Algoritma Wall Following](#4-algoritma-wall-following)
-5. [Kontroler PID untuk Wall Follower](#5-kontroler-pid-untuk-wall-follower)
-6. [ESP32 dan PlatformIO](#6-esp32-dan-platformio)
-7. [Konfigurasi Motor Driver dan Aktuator](#7-konfigurasi-motor-driver-dan-aktuator)
-8. [Integrasi Wall Follower dan Line Follower](#8-integrasi-wall-follower-dan-line-follower)
-9. [Setting Parameter via Hotspot ESP32](#9-setting-parameter-via-hotspot-esp32)
-10. [Pseudo Code dan Implementasi](#10-pseudo-code-dan-implementasi)
-11. [Referensi](#11-referensi)
+4. [Sensor IMU MPU-6050](#4-sensor-imu-mpu-6050)
+5. [Algoritma Wall Following](#5-algoritma-wall-following)
+6. [Kontroler PID untuk Wall Follower](#6-kontroler-pid-untuk-wall-follower)
+7. [ESP32 dan PlatformIO](#7-esp32-dan-platformio)
+8. [Konfigurasi Motor Driver dan Aktuator](#8-konfigurasi-motor-driver-dan-aktuator)
+9. [Integrasi Wall Follower dan Line Follower](#9-integrasi-wall-follower-dan-line-follower)
+10. [Setting Parameter via Hotspot ESP32](#10-setting-parameter-via-hotspot-esp32)
+11. [Pseudo Code dan Implementasi](#11-pseudo-code-dan-implementasi)
+12. [Referensi](#12-referensi)
 
 ---
 
@@ -208,9 +209,346 @@ float readIRSharp(int analogPin) {
 
 ---
 
-## 4. ALGORITMA WALL FOLLOWING
+## 4. SENSOR IMU MPU-6050
 
-### 4.1 Left-Hand Rule (Aturan Tangan Kiri)
+### 4.1 Pengenalan MPU-6050
+
+**MPU-6050** adalah modul **IMU (Inertial Measurement Unit)** 6-DOF (Degrees of Freedom) yang menggabungkan:
+- **Accelerometer 3-axis (X, Y, Z):** mengukur percepatan linear termasuk gravitasi (±2g / ±4g / ±8g / ±16g)
+- **Gyroscope 3-axis (X, Y, Z):** mengukur kecepatan sudut / laju rotasi (±250 / ±500 / ±1000 / ±2000 °/s)
+- **Sensor suhu** onboard: -40°C hingga +85°C
+- **DMP (Digital Motion Processor):** prosesor onboard untuk filter quaternion
+
+Antarmuka komunikasi menggunakan **I2C** (400kHz fast mode), dengan alamat I2C **0x68** (AD0=GND) atau **0x69** (AD0=VCC).
+
+### 4.2 Relevansi MPU-6050 untuk Wall Follower Robot
+
+Penambahan MPU-6050 pada wall follower robot memberikan keunggulan signifikan:
+
+| Fungsi | Manfaat untuk Wall Follower |
+|--------|----------------------------|
+| **Deteksi heading (yaw)** | Robot mengetahui orientasi absolut → belokan sudut tepat |
+| **Deteksi kemiringan (pitch/roll)** | Mendeteksi permukaan miring, tanjakan, atau robot terguling |
+| **Deteksi getaran/benturan** | Alert jika robot menabrak dinding keras (impact detection) |
+| **Stabilisasi gerak lurus** | Gyro menjaga robot berjalan lurus tanpa drift motor |
+| **Odometri berbasis IMU** | Estimasi posisi sederhana tanpa encoder roda |
+| **Dead reckoning** | Melanjutkan navigasi saat sensor jarak gagal sementara |
+| **Deteksi slip roda** | Accelerometer vs expected motion → deteksi wheel slip |
+
+### 4.3 Spesifikasi Teknis MPU-6050
+
+| Parameter | Nilai |
+|----------|-------|
+| Tegangan supply | 3.3V (modul breakout biasanya 5V-tolerant) |
+| Arus konsumsi | 3.9 mA (normal), 10 µA (sleep) |
+| Antarmuka | I2C (hingga 400 kHz), SPI (MPU-6000) |
+| Alamat I2C | 0x68 (default) atau 0x69 |
+| Resolusi ADC | 16-bit untuk accel dan gyro |
+| Full-scale accel | ±2g, ±4g, ±8g, ±16g |
+| Full-scale gyro | ±250, ±500, ±1000, ±2000 °/s |
+| Sensitivitas accel | 16384 LSB/g (pada ±2g) |
+| Sensitivitas gyro | 131 LSB/(°/s) (pada ±250°/s) |
+| Interrupt pin | INT – untuk data ready, motion detect |
+| FIFO buffer | 1024 bytes |
+| DMP | 6-axis quaternion fusion |
+| Dimensi modul | 20.3mm × 15.6mm |
+
+### 4.4 Koneksi MPU-6050 ke ESP32
+
+| Pin MPU-6050 | Pin ESP32 | Keterangan |
+|-------------|----------|-----------|
+| VCC | 3.3V | Tegangan supply (bukan 5V!) |
+| GND | GND | Ground |
+| SCL | GPIO 22 | I2C Clock |
+| SDA | GPIO 21 | I2C Data |
+| INT | GPIO 4 | Interrupt (opsional) |
+| AD0 | GND | Alamat I2C = 0x68 |
+
+> **⚠️ CATATAN:** Pada beberapa modul MPU-6050 breakout, terdapat regulator 3.3V onboard sehingga pin VCC bisa dihubungkan ke 5V. Periksa datasheet modul yang digunakan.
+
+### 4.5 Library MPU-6050 untuk PlatformIO
+
+```ini
+; platformio.ini - tambahkan library berikut
+lib_deps = 
+    electroniccats/MPU6050@^1.3.0
+    ; atau alternatif:
+    ; jrowberg/I2Cdevlib-MPU6050@^1.0.0
+```
+
+### 4.6 Inisialisasi dan Pembacaan Data MPU-6050
+
+```cpp
+#include <Wire.h>
+#include <MPU6050.h>
+
+MPU6050 mpu;
+
+// Data sensor global
+struct IMUData {
+    float accelX, accelY, accelZ;  // dalam g
+    float gyroX, gyroY, gyroZ;     // dalam °/s
+    float temperature;              // dalam °C
+    float yaw, pitch, roll;         // dalam derajat (perlu integrasi)
+} imuData;
+
+// Kalibrasi offset (diisi setelah kalibrasi)
+int16_t ax_off = 0, ay_off = 0, az_off = 0;
+int16_t gx_off = 0, gy_off = 0, gz_off = 0;
+
+void setupMPU6050() {
+    Wire.begin(21, 22);  // SDA=21, SCL=22 untuk ESP32
+    Wire.setClock(400000);  // Fast mode 400kHz
+    
+    mpu.initialize();
+    
+    if (!mpu.testConnection()) {
+        Serial.println("MPU6050 tidak terdeteksi!");
+        return;
+    }
+    Serial.println("MPU6050 OK - Alamat I2C: 0x68");
+    
+    // Set full-scale range
+    mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_2);   // ±2g
+    mpu.setFullScaleGyroRange(MPU6050_GYRO_FS_250);   // ±250°/s
+    
+    // Set DLPF (Digital Low Pass Filter) - mengurangi noise
+    mpu.setDLPFMode(MPU6050_DLPF_BW_42);  // 42 Hz bandwidth
+    
+    // Kalibrasi offset
+    calibrateMPU6050();
+}
+
+void calibrateMPU6050() {
+    Serial.println("Kalibrasi MPU6050... Jangan gerakkan robot!");
+    int32_t sum_ax=0, sum_ay=0, sum_az=0;
+    int32_t sum_gx=0, sum_gy=0, sum_gz=0;
+    const int N = 200;
+    
+    for (int i = 0; i < N; i++) {
+        int16_t ax, ay, az, gx, gy, gz;
+        mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+        sum_ax += ax; sum_ay += ay; sum_az += az;
+        sum_gx += gx; sum_gy += gy; sum_gz += gz;
+        delay(5);
+    }
+    
+    ax_off = sum_ax / N;
+    ay_off = sum_ay / N;
+    az_off = (sum_az / N) - 16384;  // kurangi gravitasi 1g
+    gx_off = sum_gx / N;
+    gy_off = sum_gy / N;
+    gz_off = sum_gz / N;
+    
+    Serial.println("Kalibrasi selesai.");
+}
+
+void readMPU6050() {
+    int16_t ax, ay, az, gx, gy, gz;
+    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+    
+    // Terapkan offset kalibrasi
+    ax -= ax_off; ay -= ay_off; az -= az_off;
+    gx -= gx_off; gy -= gy_off; gz -= gz_off;
+    
+    // Konversi ke satuan fisik
+    imuData.accelX = ax / 16384.0;   // g
+    imuData.accelY = ay / 16384.0;
+    imuData.accelZ = az / 16384.0;
+    imuData.gyroX  = gx / 131.0;    // °/s
+    imuData.gyroY  = gy / 131.0;
+    imuData.gyroZ  = gz / 131.0;
+    imuData.temperature = mpu.getTemperature() / 340.0 + 36.53;
+}
+```
+
+### 4.7 Kalkulasi Sudut dari MPU-6050
+
+#### Metode 1: Dari Accelerometer Saja (statis, tanpa drift tapi noisy saat bergerak)
+
+```cpp
+float calcPitchAccel(float ax, float ay, float az) {
+    return atan2(-ax, sqrt(ay*ay + az*az)) * 180.0 / PI;
+}
+
+float calcRollAccel(float ax, float ay, float az) {
+    return atan2(ay, az) * 180.0 / PI;
+}
+```
+
+#### Metode 2: Integrasi Gyroscope (dinamis, tapi drift bertambah)
+
+```cpp
+float yaw   = 0.0;
+float pitch = 0.0;
+float roll  = 0.0;
+unsigned long lastIMUTime = 0;
+
+void integrateGyro() {
+    unsigned long now = millis();
+    float dt = (now - lastIMUTime) / 1000.0;
+    lastIMUTime = now;
+    
+    yaw   += imuData.gyroZ * dt;
+    pitch += imuData.gyroY * dt;
+    roll  += imuData.gyroX * dt;
+}
+```
+
+#### Metode 3: Complementary Filter (gabungan accel + gyro – DIREKOMENDASIKAN)
+
+```cpp
+// Alpha mendekati 1.0 = lebih percaya gyro (smooth tapi ada drift)
+// Alpha mendekati 0.0 = lebih percaya accel (noise tapi tidak drift)
+const float ALPHA = 0.96;
+
+float compPitch = 0.0, compRoll = 0.0;
+unsigned long lastCompTime = 0;
+
+void complementaryFilter() {
+    unsigned long now = millis();
+    float dt = (now - lastCompTime) / 1000.0;
+    lastCompTime = now;
+    
+    float accelPitch = calcPitchAccel(imuData.accelX, imuData.accelY, imuData.accelZ);
+    float accelRoll  = calcRollAccel(imuData.accelX, imuData.accelY, imuData.accelZ);
+    
+    compPitch = ALPHA * (compPitch + imuData.gyroY * dt) + (1.0 - ALPHA) * accelPitch;
+    compRoll  = ALPHA * (compRoll  + imuData.gyroX * dt) + (1.0 - ALPHA) * accelRoll;
+}
+```
+
+#### Metode 4: DMP (Digital Motion Processor) – Akurasi Tertinggi
+
+```cpp
+// Menggunakan built-in DMP MPU-6050 untuk quaternion fusion
+// Memerlukan library I2Cdevlib versi lengkap
+#include "MPU6050_6Axis_MotionApps20.h"
+
+MPU6050 mpu;
+uint16_t packetSize;
+uint8_t fifoBuffer[64];
+Quaternion q;
+VectorFloat gravity;
+float yprDMP[3];  // [yaw, pitch, roll] dalam radian
+
+void setupDMP() {
+    mpu.dmpInitialize();
+    mpu.setDMPEnabled(true);
+    packetSize = mpu.dmpGetFIFOPacketSize();
+}
+
+void readDMP() {
+    if (mpu.dmpGetCurrentFIFOPacket(fifoBuffer)) {
+        mpu.dmpGetQuaternion(&q, fifoBuffer);
+        mpu.dmpGetGravity(&gravity, &q);
+        mpu.dmpGetYawPitchRoll(yprDMP, &q, &gravity);
+        // yprDMP[0] = yaw (radian), konversi ke derajat: yprDMP[0] * 180/PI
+    }
+}
+```
+
+### 4.8 Aplikasi MPU-6050 pada Wall Follower: Gyro-Assisted Turning
+
+Salah satu penggunaan paling penting MPU-6050 pada wall follower adalah **belokan presisi berbasis gyroscope**. Robot dapat berbelok tepat 90° tanpa encoder roda:
+
+```cpp
+// Belokan tepat 90 derajat ke kanan menggunakan gyro
+void turnRight90Gyro() {
+    float startYaw = yaw;
+    float targetYaw = startYaw + 90.0;
+    
+    // Mulai belokan
+    setMotorSpeed(150, -150);  // Motor kiri maju, kanan mundur
+    
+    while (abs(yaw - startYaw) < 88.0) {
+        readMPU6050();
+        integrateGyro();
+        delay(5);
+    }
+    
+    setMotorSpeed(0, 0);  // Stop
+    Serial.print("Belokan selesai. Yaw actual: ");
+    Serial.println(yaw - startYaw);
+}
+
+// Berjalan lurus dengan koreksi gyro
+void moveForwardStraight(int baseSpeed, float targetHeading) {
+    readMPU6050();
+    integrateGyro();
+    
+    float headingError = targetHeading - yaw;
+    float correction = 2.0 * headingError;  // Kp=2.0 untuk heading
+    
+    int speedL = constrain(baseSpeed + correction, 0, 255);
+    int speedR = constrain(baseSpeed - correction, 0, 255);
+    setMotorSpeed(speedL, speedR);
+}
+```
+
+### 4.9 Deteksi Benturan dengan Accelerometer
+
+```cpp
+// Deteksi impact/benturan keras
+const float IMPACT_THRESHOLD = 2.5;  // g (gravitasi)
+
+bool detectImpact() {
+    float totalAccel = sqrt(
+        imuData.accelX * imuData.accelX +
+        imuData.accelY * imuData.accelY +
+        imuData.accelZ * imuData.accelZ
+    );
+    // Kurangi 1g (gravitasi statis), jika sisa > threshold = ada benturan
+    return (abs(totalAccel - 1.0) > IMPACT_THRESHOLD);
+}
+
+// Deteksi kemiringan berbahaya (robot hampir terguling)
+bool detectTilt() {
+    return (abs(compRoll) > 30.0 || abs(compPitch) > 30.0);
+}
+```
+
+### 4.10 Integrasi MPU-6050 dalam Sistem Wall Follower
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              WALL FOLLOWER + MPU-6050 SYSTEM                │
+│                                                             │
+│  ┌──────────┐   ┌──────────┐   ┌───────────────────────┐   │
+│  │ HC-SR04  │   │ MPU-6050 │   │     ESP32 Core 0      │   │
+│  │  × 3     │──▶│ I2C 0x68 │──▶│  Sensor Task          │   │
+│  └──────────┘   └──────────┘   │  - Baca HC-SR04 ×3    │   │
+│  ┌──────────┐                  │  - Baca MPU-6050       │   │
+│  │ IR Line  │──────────────────│  - Filter + Fusion     │   │
+│  │  × 4     │                  └──────────┬────────────┘   │
+│  └──────────┘                             │ Shared Data     │
+│                                           ▼                 │
+│                                 ┌───────────────────────┐   │
+│                                 │     ESP32 Core 1      │   │
+│                                 │  Control Task         │   │
+│                                 │  - Mode determination │   │
+│                                 │  - PID (distance)     │   │
+│                                 │  - PID (heading/yaw)  │   │
+│                                 │  - Motor output       │   │
+│                                 │  - Web server         │   │
+│                                 └───────────┬───────────┘   │
+│                                             │               │
+│                                    ┌────────▼────────┐      │
+│                                    │   L298N Motor   │      │
+│                                    │   Driver        │      │
+│                                    └────────┬────────┘      │
+│                                             │               │
+│                                    ┌────────▼────────┐      │
+│                                    │  DC Motor × 2   │      │
+│                                    └─────────────────┘      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 5. ALGORITMA WALL FOLLOWING
+
+### 5.1 Left-Hand Rule (Aturan Tangan Kiri)
 
 Robot selalu mengikuti dinding di sisi **kiri**. Prioritas navigasi:
 
@@ -221,7 +559,7 @@ Robot selalu mengikuti dinding di sisi **kiri**. Prioritas navigasi:
 4. Jika tidak ada dinding di semua sisi → Belok kiri (default)
 ```
 
-### 4.2 Right-Hand Rule (Aturan Tangan Kanan)
+### 5.2 Right-Hand Rule (Aturan Tangan Kanan)
 
 Robot selalu mengikuti dinding di sisi **kanan**. Prioritas navigasi:
 
@@ -232,7 +570,7 @@ Robot selalu mengikuti dinding di sisi **kanan**. Prioritas navigasi:
 4. Jika tidak ada dinding di semua sisi → Belok kanan (default)
 ```
 
-### 4.3 Bug Algorithm (Peningkatan Wall Following)
+### 5.3 Bug Algorithm (Peningkatan Wall Following)
 
 Bug Algorithm merupakan pengembangan wall following yang mampu menuju **target spesifik**:
 
@@ -249,7 +587,7 @@ BUG1:
 4. Lanjut ke target
 ```
 
-### 4.4 Fuzzy Logic untuk Wall Following
+### 5.4 Fuzzy Logic untuk Wall Following
 
 Fuzzy logic memberikan respons yang lebih halus dibanding algoritma threshold biner:
 
@@ -276,9 +614,9 @@ Fuzzy logic memberikan respons yang lebih halus dibanding algoritma threshold bi
 
 ---
 
-## 5. KONTROLER PID UNTUK WALL FOLLOWER
+## 6. KONTROLER PID UNTUK WALL FOLLOWER
 
-### 5.1 Konsep PID
+### 6.1 Konsep PID
 
 **PID (Proportional-Integral-Derivative)** adalah kontroler klasik yang banyak digunakan dalam sistem kontrol otomatis, termasuk wall follower robot:
 
@@ -292,7 +630,7 @@ Dimana:
 - `Ki` = Integral gain → akumulasi error masa lalu
 - `Kd` = Derivative gain → prediksi error masa depan
 
-### 5.2 Penerapan PID pada Wall Follower
+### 6.2 Penerapan PID pada Wall Follower
 
 ```
 Setpoint: jarak ideal ke dinding = 15 cm
@@ -305,7 +643,7 @@ Respons PID:
 - D: kecepatan perubahan error → antisipasi overshoot
 ```
 
-### 5.3 Tuning PID
+### 6.3 Tuning PID
 
 **Metode Ziegler-Nichols:**
 1. Set Ki = 0, Kd = 0
@@ -318,7 +656,7 @@ Respons PID:
 - Ki = 0.01 – 0.1
 - Kd = 0.5 – 2.0
 
-### 5.4 Implementasi PID dalam C++ (PlatformIO)
+### 6.4 Implementasi PID dalam C++ (PlatformIO)
 
 ```cpp
 class PIDController {
@@ -375,9 +713,9 @@ public:
 
 ---
 
-## 6. ESP32 DAN PLATFORMIO
+## 7. ESP32 DAN PLATFORMIO
 
-### 6.1 Keunggulan ESP32 untuk Wall Follower
+### 7.1 Keunggulan ESP32 untuk Wall Follower
 
 | Fitur | Nilai | Manfaat untuk Wall Follower |
 |-------|-------|---------------------------|
@@ -390,7 +728,7 @@ public:
 | Timer | 4× 64-bit | Presisi timing ultrasonik |
 | GPIO | 34 pin | Cukup untuk semua sensor+motor |
 
-### 6.2 Setup PlatformIO untuk ESP32
+### 7.2 Setup PlatformIO untuk ESP32
 
 **platformio.ini:**
 ```ini
@@ -408,7 +746,7 @@ build_flags =
     -DCORE_DEBUG_LEVEL=0
 ```
 
-### 6.3 Penanganan Multi-Sensor dengan Dual Core ESP32
+### 7.3 Penanganan Multi-Sensor dengan Dual Core ESP32
 
 ```cpp
 // Deklarasi task untuk dual core
@@ -465,9 +803,9 @@ void controlTask(void* parameter) {
 
 ---
 
-## 7. KONFIGURASI MOTOR DRIVER DAN AKTUATOR
+## 8. KONFIGURASI MOTOR DRIVER DAN AKTUATOR
 
-### 7.1 L298N Motor Driver
+### 8.1 L298N Motor Driver
 
 L298N adalah H-Bridge dual channel yang memungkinkan kontrol arah dan kecepatan 2 motor DC:
 
@@ -489,7 +827,7 @@ L298N adalah H-Bridge dual channel yang memungkinkan kontrol arah dan kecepatan 
 | Belok Kiri | LOW | HIGH | HIGH | LOW | Turn Left |
 | Berhenti | LOW | LOW | LOW | LOW | Stop |
 
-### 7.2 Kontrol PWM Motor ESP32 (LEDC)
+### 8.2 Kontrol PWM Motor ESP32 (LEDC)
 
 ```cpp
 // Setup PWM untuk motor (ESP32 LEDC API)
@@ -541,9 +879,9 @@ void setMotorSpeed(int speedA, int speedB) {
 
 ---
 
-## 8. INTEGRASI WALL FOLLOWER DAN LINE FOLLOWER
+## 9. INTEGRASI WALL FOLLOWER DAN LINE FOLLOWER
 
-### 8.1 Konsep Hybrid Navigation
+### 9.1 Konsep Hybrid Navigation
 
 Menggabungkan wall follower dan line follower memungkinkan robot bernavigasi lebih cerdas:
 
@@ -562,14 +900,14 @@ MODE SWITCHING LOGIC:
 └──────────────────────────────────────────────┘
 ```
 
-### 8.2 Prioritas Mode
+### 9.2 Prioritas Mode
 
 1. **Mode Darurat (Emergency):** Jarak depan < 5 cm → STOP
 2. **Mode Line Follower:** Sensor IR lantai mendeteksi garis → ikuti garis
 3. **Mode Wall Follower:** Sensor ultrasonik mendeteksi dinding → ikuti dinding
 4. **Mode Explore:** Tidak ada referensi → putar mencari dinding/garis
 
-### 8.3 Transisi Antar Mode
+### 9.3 Transisi Antar Mode
 
 ```cpp
 enum RobotMode {
@@ -600,9 +938,9 @@ RobotMode determineMode(float dL, float dF, float dR,
 
 ---
 
-## 9. SETTING PARAMETER VIA HOTSPOT ESP32
+## 10. SETTING PARAMETER VIA HOTSPOT ESP32
 
-### 9.1 ESP32 sebagai Access Point (AP Mode)
+### 10.1 ESP32 sebagai Access Point (AP Mode)
 
 ESP32 dapat berfungsi sebagai WiFi Access Point, memungkinkan smartphone terhubung langsung tanpa router eksternal:
 
@@ -627,7 +965,7 @@ void setupWiFiAP() {
 }
 ```
 
-### 9.2 Web Interface Parameter Setting
+### 10.2 Web Interface Parameter Setting
 
 Parameter yang dapat diatur via Web:
 
@@ -642,7 +980,7 @@ Parameter yang dapat diatur via Web:
 | `obstacle_dist` | 10 cm | 5–20 cm | Jarak minimum obstacle depan |
 | `max_speed` | 200 | 100–255 | Kecepatan maksimum motor |
 
-### 9.3 REST API Endpoint
+### 10.3 REST API Endpoint
 
 ```
 GET  /status          → JSON status sensor dan mode robot
@@ -654,9 +992,9 @@ GET  /sensor          → JSON data sensor real-time
 
 ---
 
-## 10. PSEUDO CODE DAN IMPLEMENTASI
+## 11. PSEUDO CODE DAN IMPLEMENTASI
 
-### 10.1 Pseudo Code Wall Follower Dasar
+### 11.1 Pseudo Code Wall Follower Dasar
 
 ```
 INISIALISASI:
@@ -703,7 +1041,7 @@ LOOP UTAMA:
   TUNGGU 20ms
 ```
 
-### 10.2 Pseudo Code Maze Solving (Bug Algorithm)
+### 11.2 Pseudo Code Maze Solving (Bug Algorithm)
 
 ```
 INISIALISASI:
@@ -742,7 +1080,113 @@ LOOP:
     SELESAI
 ```
 
-### 10.3 Pseudo Code Mode Hybrid (Wall + Line)
+### 11.3 Pseudo Code Mode Hybrid (Wall + Line + MPU-6050)
+
+```
+FUNGSI HYBRID_NAVIGATION_WITH_IMU():
+  BACA semua sensor ultrasonik
+  BACA sensor IR lantai
+  BACA MPU6050 → accelX, accelY, accelZ, gyroZ
+  TERAPKAN complementary filter → pitch, roll, yaw
+
+  // Keamanan berdasarkan IMU
+  JIKA detectTilt(pitch, roll) MAKA
+    HENTIKAN motor
+    KIRIM ALERT ke web client
+    RETURN
+  JIKA detectImpact(accel) MAKA
+    HENTIKAN motor 200ms
+    MUNDUR 0.3 detik
+    RETURN
+
+  mode ← TENTUKAN_MODE()
+
+  SESUAI mode:
+    KASUS STOP:
+      HENTIKAN semua motor
+      NYALAKAN LED_MERAH
+
+    KASUS LINE_FOLLOWER:
+      error_line ← (lineL_value - lineR_value)
+      speedDiff ← Kp_line × error_line
+      // Tambah koreksi heading dari gyro
+      headingCorr ← Kp_heading × (targetHeading - yaw)
+      SET_MOTOR(BASE_SPEED - speedDiff + headingCorr,
+                BASE_SPEED + speedDiff - headingCorr)
+      NYALAKAN LED_HIJAU
+
+    KASUS WALL_FOLLOW_LEFT:
+      // Koreksi jarak dari PID ultrasonik
+      distCorr ← PID_wall.compute(distLeft)
+      // Koreksi heading dari gyro untuk jalan lurus
+      headingCorr ← Kp_heading × (targetHeading - yaw)
+      speedL ← BASE_SPEED - distCorr + headingCorr
+      speedR ← BASE_SPEED + distCorr - headingCorr
+      BATASI speedL, speedR
+      SET_MOTOR(speedL, speedR)
+      NYALAKAN LED_BIRU
+
+    KASUS WALL_FOLLOW_RIGHT:
+      distCorr ← PID_wall.compute(distRight)
+      headingCorr ← Kp_heading × (targetHeading - yaw)
+      speedL ← BASE_SPEED + distCorr + headingCorr
+      speedR ← BASE_SPEED - distCorr - headingCorr
+      BATASI speedL, speedR
+      SET_MOTOR(speedL, speedR)
+      NYALAKAN LED_KUNING
+
+    KASUS TURN_90_LEFT:
+      startYaw ← yaw
+      SET_MOTOR(-TURN_SPEED, TURN_SPEED)
+      TUNGGU SAMPAI abs(yaw - startYaw) >= 88
+      SET_MOTOR(0, 0)
+      targetHeading ← yaw
+
+    KASUS TURN_90_RIGHT:
+      startYaw ← yaw
+      SET_MOTOR(TURN_SPEED, -TURN_SPEED)
+      TUNGGU SAMPAI abs(yaw - startYaw) >= 88
+      SET_MOTOR(0, 0)
+      targetHeading ← yaw
+
+    KASUS EXPLORE:
+      PUTAR_PERLAHAN(kiri)
+      NYALAKAN LED_PUTIH berkedip
+
+  KIRIM data sensor + IMU ke Web Client via WebSocket
+  CATAT log ke Serial Monitor
+```
+
+### 11.4 Pseudo Code Kalibrasi IMU Saat Startup
+
+```
+PROSEDUR KALIBRASI_IMU():
+  TAMPILKAN "Letakkan robot di permukaan datar, jangan gerakkan"
+  TUNGGU tombol START ditekan
+  NYALAKAN buzzer 1 beep pendek
+  
+  sum_gx ← 0, sum_gy ← 0, sum_gz ← 0
+  sum_ax ← 0, sum_ay ← 0, sum_az ← 0
+  N ← 200
+
+  UNTUK i dari 1 sampai N:
+    BACA raw data dari MPU6050
+    sum_gx += raw_gx; sum_gy += raw_gy; sum_gz += raw_gz
+    sum_ax += raw_ax; sum_ay += raw_ay; sum_az += raw_az
+    TUNGGU 5ms
+
+  offset_gx ← sum_gx / N
+  offset_gy ← sum_gy / N
+  offset_gz ← sum_gz / N
+  offset_ax ← sum_ax / N
+  offset_ay ← sum_ay / N
+  offset_az ← (sum_az / N) - 16384  // kompensasi gravitasi 1g
+
+  SIMPAN offset ke Preferences NVS Flash
+  NYALAKAN buzzer 2 beep
+  TAMPILKAN "Kalibrasi selesai, robot siap"
+```
+
 
 ```
 FUNGSI HYBRID_NAVIGATION():
@@ -788,7 +1232,7 @@ FUNGSI HYBRID_NAVIGATION():
 
 ---
 
-## 11. REFERENSI
+## 12. REFERENSI
 
 ### Jurnal/Paper Ilmiah
 

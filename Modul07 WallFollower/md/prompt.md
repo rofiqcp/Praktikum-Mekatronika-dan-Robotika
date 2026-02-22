@@ -244,7 +244,7 @@ Langkah-langkah yang harus dijelaskan:
 3. Konfigurasi platformio.ini (tampilkan kode lengkap):
    - Platform, board, framework
    - Monitor speed
-   - Library dependencies (ESPAsyncWebServer, ArduinoJson)
+   - Library dependencies (ESPAsyncWebServer, ArduinoJson, electroniccats/MPU6050)
    - Upload speed
 4. Struktur folder proyek PlatformIO yang benar:
    src/main.cpp, include/config.h, lib/, test/
@@ -254,6 +254,88 @@ Langkah-langkah yang harus dijelaskan:
 
 Sertakan screenshot placeholder dan kode konfigurasi.
 Bahasa Indonesia, step-by-step guide.
+```
+
+---
+
+### PROMPT 12B – SLIDE SENSOR IMU MPU-6050 (BAGIAN 1: DASAR)
+
+```
+Buatkan slide penjelasan lengkap sensor IMU MPU-6050 untuk wall follower robot.
+Cakupan:
+1. Apa itu IMU? Perbedaan accelerometer vs gyroscope vs magnetometer
+2. MPU-6050: sensor 6-DOF (3-axis accel + 3-axis gyro)
+3. Cara kerja MEMS accelerometer: massa pegas mikro, perubahan kapasitansi
+4. Cara kerja MEMS gyroscope: efek Coriolis pada massa getar
+5. Spesifikasi MPU-6050 (tabel lengkap): resolusi, range, noise, supply
+6. Koneksi ke ESP32 via I2C (SDA=GPIO21, SCL=GPIO22, alamat 0x68/0x69)
+7. Kode inisialisasi dengan library electroniccats/MPU6050
+8. Mengapa perlu kalibrasi offset? Demonstrasi numerik (robot diam tapi GyroZ ≠ 0)
+
+Sertakan diagram koneksi I2C dan timing diagram I2C.
+Bahasa Indonesia.
+```
+
+---
+
+### PROMPT 12C – SLIDE SENSOR IMU MPU-6050 (BAGIAN 2: KALKULASI SUDUT)
+
+```
+Buatkan slide penjelasan cara menghitung sudut (pitch, roll, yaw) dari MPU-6050.
+Cakupan:
+1. Metode 1 – Accelerometer only:
+   - Rumus pitch = atan2(-ax, sqrt(ay²+az²))
+   - Rumus roll  = atan2(ay, az)
+   - Kelebihan: tidak drift | Kekurangan: noise saat bergerak
+2. Metode 2 – Gyroscope integration:
+   - angle += gyro_rate × dt
+   - Kelebihan: smooth | Kekurangan: drift bertambah seiring waktu
+3. Metode 3 – Complementary Filter (DIREKOMENDASIKAN):
+   - angle = α × (angle + gyro×dt) + (1-α) × accel_angle
+   - Visualisasi: accel = slow truth, gyro = fast smooth → gabungan terbaik
+   - Pilih α = 0.96 (96% gyro, 4% accel)
+4. Metode 4 – DMP onboard MPU-6050:
+   - Quaternion fusion dalam chip, output langsung yaw/pitch/roll
+   - Library: MPU6050_6Axis_MotionApps20.h
+5. Perbandingan keempat metode (tabel: akurasi, latency, CPU load)
+6. Kode implementasi complementary filter
+
+Bahasa Indonesia, dengan grafik perbandingan sinyal (konseptual).
+```
+
+---
+
+### PROMPT 12D – SLIDE MPU-6050: APLIKASI DI WALL FOLLOWER
+
+```
+Buatkan slide tentang aplikasi konkret MPU-6050 pada sistem wall follower robot.
+Cakupan dengan kode contoh masing-masing:
+
+1. GYRO-ASSISTED STRAIGHT MOVEMENT:
+   - Masalah: motor kiri/kanan sedikit berbeda kecepatan → robot miring
+   - Solusi: PID heading dengan gyro Z sebagai feedback
+   - Kode: moveForwardStraight(baseSpeed, targetHeading)
+
+2. GYRO-ASSISTED 90° TURN:
+   - Masalah: belokan berbasis timer tidak akurat (bergantung baterai, permukaan)
+   - Solusi: berhenti tepat saat gyro menunjukkan 90° terputar
+   - Kode: turnRight90Gyro() dengan while loop + yaw comparison
+
+3. TILT/ROLL SAFETY DETECTION:
+   - Masalah: robot terjatuh dari meja atau terguling di permukaan miring
+   - Solusi: deteksi roll > 30° atau pitch > 30° → motor stop otomatis
+   - Kode: detectTilt(compPitch, compRoll)
+
+4. IMPACT/COLLISION DETECTION:
+   - Masalah: robot bertabrakan sebelum sensor ultrasonik mendeteksi
+   - Solusi: spike pada total acceleration > 2.5g → emergency stop
+   - Kode: detectImpact()
+
+5. DEAD RECKONING SEDERHANA:
+   - Integrasi gyro Z untuk estimasi posisi sudut saat bernavigasi
+   - Akurasi terbatas, cocok untuk jangka pendek
+
+Bahasa Indonesia, sertakan diagram alir untuk setiap aplikasi.
 ```
 
 ---
@@ -774,6 +856,38 @@ PERCOBAAN 10 – Wall Follower di Lingkungan Dinamis:
 - Multiple robots: 2 robot wall follower di maze yang sama (jika tersedia)
 - Tugas: modifikasi kode untuk menangani rintangan lebih robust
 
+Bahasa Indonesia.
+```
+
+---
+
+### PROMPT 33B – SLIDE PERCOBAAN 11-13 (MPU-6050)
+
+```
+Buatkan slide deskripsi tiga percobaan yang menggunakan sensor IMU MPU-6050.
+
+PERCOBAAN 11 – Kalibrasi dan Pembacaan MPU-6050:
+- Tujuan: memahami output raw accelerometer dan gyroscope
+- Prosedur: robot diam → amati baseline; robot dimiringkan → amati perubahan
+- Data: tabel AccelX/Y/Z dan GyroX/Y/Z pada berbagai posisi
+- Pertanyaan: mengapa AccelZ ≈ +1g saat robot datar?
+- Visualisasi: Serial Plotter real-time
+
+PERCOBAAN 12 – Gyro-Assisted Straight Movement & 90° Turn:
+- Bagian A: Gerak lurus 1 meter tanpa vs dengan koreksi gyro
+  → ukur penyimpangan lateral (cm) dan penyimpangan arah (°)
+- Bagian B: Belokan 90° dengan timer vs dengan gyro
+  → ukur error sudut dengan busur derajat (3× ulangan)
+- Tabel perbandingan akurasi: timer-based vs gyro-based
+
+PERCOBAAN 13 – Impact Detection & Tilt Safety:
+- Bagian A: Robot menabrak dinding → deteksi spike akselerasi
+  → tuning threshold: 1.5g, 2.0g, 2.5g, 3.0g
+- Bagian B: Robot diangkat/dimiringkan → motor stop otomatis
+  → uji pada kemiringan 15°, 30°, 45°
+- Evaluasi: false positive rate dan detection time
+
+Format: slide prosedur, tabel data, kode utama yang relevan.
 Bahasa Indonesia.
 ```
 
