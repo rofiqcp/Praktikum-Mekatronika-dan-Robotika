@@ -977,6 +977,17 @@ public class SensorData {
 }
 ```
 
+**`SensorRepository.java`:**
+```java
+@Repository
+public interface SensorRepository extends JpaRepository<SensorData, Long> {
+    Optional<SensorData> findFirstByDeviceIdOrderByTimestampDesc(String deviceId);
+
+    @Query("SELECT AVG(s.suhu) FROM SensorData s WHERE s.deviceId = :deviceId")
+    Double findAvgSuhuByDeviceId(@Param("deviceId") String deviceId);
+}
+```
+
 **`SensorController.java`:**
 ```java
 @RestController
