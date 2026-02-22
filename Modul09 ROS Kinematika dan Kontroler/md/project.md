@@ -117,7 +117,7 @@ Tim SAR (Search and Rescue) membutuhkan sistem 3 robot yang bergerak dalam forma
 - Tidak terjadi tabrakan antar robot
 - Formasi terjaga saat leader berhenti mendadak
 
-**Rekomendasi Hardware:** 3x Mini PC / 1 Mini PC + 2 Raspberry Pi + 3 robot difensial kecil
+**Rekomendasi Hardware:** 3x Mini PC / 1 Mini PC + 2 Raspberry Pi + 3 robot diferensial kecil
 
 ---
 
@@ -173,7 +173,7 @@ Kampus modern ingin mengimplementasikan sistem pengiriman paket otonom menggunak
 - Berhenti dalam 0.3m sebelum obstacle
 - Melanjutkan perjalanan dalam 2 detik setelah obstacle hilang
 
-**Rekomendasi Hardware:** Mini PC + robot difensial + RPLidar A1 + chassis robot mobile 4 roda
+**Rekomendasi Hardware:** Mini PC + robot diferensial + RPLidar A1 + chassis robot mobile 4 roda
 
 ---
 

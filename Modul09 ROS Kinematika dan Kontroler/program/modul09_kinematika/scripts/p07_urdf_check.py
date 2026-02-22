@@ -4,7 +4,7 @@ P07 - URDF Robot Check (tanpa hardware)
 Modul 09: ROS Kinematika dan Kontroler
 Prodi Teknologi Rekayasa Otomasi
 
-Script helper untuk verifikasi URDF robot difensial.
+Script helper untuk verifikasi URDF robot diferensial.
 Launch URDF visualization menggunakan launch file:
   roslaunch modul09_kinematika p07_urdf.launch
 
