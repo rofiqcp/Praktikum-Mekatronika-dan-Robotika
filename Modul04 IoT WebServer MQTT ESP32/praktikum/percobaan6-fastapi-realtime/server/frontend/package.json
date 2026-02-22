@@ -1,0 +1,20 @@
+{
+  "name": "iot-realtime-dashboard",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Dashboard real-time untuk Percobaan 6 – FastAPI + Vue.js 3",
+  "scripts": {
+    "dev":     "vite",
+    "build":   "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue":   "^3.4.31",
+    "pinia": "^2.1.7"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.5",
+    "vite":               "^5.4.2"
+  }
+}
