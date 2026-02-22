@@ -1,0 +1,78 @@
+<!-- p15_integration.launch
+     Sistem Terintegrasi Lengkap - P15
+     Modul 09 - ROS Kinematika dan Kontroler
+     Prodi Teknologi Rekayasa Otomasi
+
+     Menggabungkan:
+     - Gazebo simulation
+     - diff_drive_controller (ros_control)
+     - robot_state_publisher (FK + TF)
+     - p15_integration.py (go-to-goal + TF + status)
+     - RViz monitoring
+
+     Jalankan: roslaunch modul09_kinematika p15_integration.launch
+     Kirim waypoints:
+       rostopic pub /waypoints std_msgs/String
+         '{"waypoints": [[1,0],[1,1],[0,1],[0,0]]}'
+-->
+<launch>
+
+  <!-- Simulasi waktu Gazebo -->
+  <param name="/use_sim_time" value="true"/>
+
+  <!-- Robot description -->
+  <param name="robot_description"
+         command="$(find xacro)/xacro
+                  $(find modul09_kinematika)/urdf/diff_robot.urdf.xacro"/>
+
+  <!-- Gazebo -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name"   value="worlds/empty.world"/>
+    <arg name="paused"       value="false"/>
+    <arg name="use_sim_time" value="true"/>
+    <arg name="gui"          value="true"/>
+    <arg name="debug"        value="false"/>
+  </include>
+
+  <!-- Spawn robot -->
+  <node name="spawn_robot"
+        pkg="gazebo_ros"
+        type="spawn_model"
+        args="-urdf -model diff_robot -param robot_description -x 0 -y 0 -z 0.1"
+        output="screen"
+        respawn="false"/>
+
+  <!-- Controllers -->
+  <rosparam file="$(find modul09_kinematika)/config/controllers.yaml"
+            command="load"/>
+  <node name="controller_spawner"
+        pkg="controller_manager"
+        type="spawner"
+        output="screen"
+        args="joint_state_controller diff_drive_controller"/>
+
+  <!-- robot_state_publisher (FK dari URDF + /joint_states → /tf) -->
+  <node name="robot_state_publisher"
+        pkg="robot_state_publisher"
+        type="robot_state_publisher"
+        output="screen">
+    <param name="publish_frequency" value="50"/>
+  </node>
+
+  <!-- P15 Integration Node -->
+  <node name="p15_integration"
+        pkg="modul09_kinematika"
+        type="p15_integration.py"
+        output="screen">
+    <remap from="/cmd_vel" to="/diff_drive_controller/cmd_vel"/>
+    <remap from="/odom"    to="/diff_drive_controller/odom"/>
+  </node>
+
+  <!-- RViz -->
+  <node name="rviz"
+        pkg="rviz"
+        type="rviz"
+        output="screen"
+        required="false"/>
+
+</launch>

@@ -1,0 +1,58 @@
+<!-- p09_go_to_goal.launch
+     Simulasi Gazebo + Go-to-Goal Controller
+     Modul 09 - ROS Kinematika dan Kontroler
+     Prodi Teknologi Rekayasa Otomasi
+
+     Jalankan: roslaunch modul09_kinematika p09_go_to_goal.launch
+     Kirim target: rostopic pub /goal geometry_msgs/Point "x: 2.0 y: 1.5 z: 0.0"
+-->
+<launch>
+
+  <!-- Parameter robot -->
+  <param name="robot_description"
+         command="$(find xacro)/xacro
+                  $(find modul09_kinematika)/urdf/diff_robot.urdf.xacro"/>
+
+  <!-- Gazebo: world kosong -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name"  value="worlds/empty.world"/>
+    <arg name="paused"      value="false"/>
+    <arg name="use_sim_time" value="true"/>
+    <arg name="gui"         value="true"/>
+    <arg name="headless"    value="false"/>
+    <arg name="debug"       value="false"/>
+  </include>
+
+  <!-- Spawn robot di Gazebo -->
+  <node name="spawn_robot"
+        pkg="gazebo_ros"
+        type="spawn_model"
+        args="-urdf -model diff_robot -param robot_description -x 0 -y 0 -z 0.1"
+        output="screen"/>
+
+  <!-- robot_state_publisher -->
+  <node name="robot_state_publisher"
+        pkg="robot_state_publisher"
+        type="robot_state_publisher"
+        output="screen"/>
+
+  <!-- Go-to-Goal controller node -->
+  <node name="go_to_goal"
+        pkg="modul09_kinematika"
+        type="p09_go_to_goal.py"
+        output="screen">
+    <param name="K_rho"        value="0.5"/>
+    <param name="K_alpha"      value="1.5"/>
+    <param name="dist_thresh"  value="0.05"/>
+    <param name="v_max"        value="0.3"/>
+    <param name="w_max"        value="1.0"/>
+  </node>
+
+  <!-- RViz -->
+  <node name="rviz"
+        pkg="rviz"
+        type="rviz"
+        output="screen"
+        required="false"/>
+
+</launch>

@@ -1,0 +1,50 @@
+# controllers.yaml
+# Konfigurasi ros_control untuk robot diferensial
+# Modul 09 - ROS Kinematika dan Kontroler
+# Prodi Teknologi Rekayasa Otomasi
+#
+# Muat dengan:
+#   rosparam load controllers.yaml
+#   rosrun controller_manager spawner joint_state_controller diff_drive_controller
+
+# Joint State Controller - wajib ada, publish /joint_states
+joint_state_controller:
+  type: joint_state_controller/JointStateController
+  publish_rate: 50
+
+# Differential Drive Controller
+diff_drive_controller:
+  type: diff_drive_controller/DiffDriveController
+
+  # Joint sendi roda
+  left_wheel:  ['left_wheel_joint']
+  right_wheel: ['right_wheel_joint']
+
+  # Dimensi robot (meter) - sesuaikan dengan URDF
+  wheel_separation: 0.20
+  wheel_radius: 0.05
+
+  # Frame ID
+  odom_frame_id:  odom
+  base_frame_id:  base_footprint
+
+  # Publish rate (Hz)
+  publish_rate: 50
+
+  # Covariance diagonal untuk odometri
+  pose_covariance_diagonal:  [0.001, 0.001, 1.0e6, 1.0e6, 1.0e6, 0.01]
+  twist_covariance_diagonal: [0.001, 1.0e6, 1.0e6, 1.0e6, 1.0e6, 0.01]
+
+  # Publish TF odom → base_footprint
+  enable_odom_tf: true
+
+  # Velocity command timeout (detik)
+  cmd_vel_timeout: 0.5
+
+  # Batas kecepatan
+  linear/x/max_velocity: 0.5       # m/s
+  linear/x/min_velocity: -0.5      # m/s
+  angular/z/max_velocity: 2.0      # rad/s
+  angular/z/min_velocity: -2.0     # rad/s
+  linear/x/max_jerk: 1.0
+  angular/z/max_jerk: 2.0

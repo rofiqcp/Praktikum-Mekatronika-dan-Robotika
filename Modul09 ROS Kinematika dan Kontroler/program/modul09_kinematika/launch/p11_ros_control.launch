@@ -1,0 +1,59 @@
+<!-- p11_ros_control.launch
+     ros_control + diff_drive_controller + Gazebo
+     Modul 09 - ROS Kinematika dan Kontroler
+     Prodi Teknologi Rekayasa Otomasi
+
+     Jalankan: roslaunch modul09_kinematika p11_ros_control.launch
+     Test: rosrun modul09_kinematika p11_ros_control_test.py
+     Kirim cmd: rostopic pub /diff_drive_controller/cmd_vel geometry_msgs/Twist
+                  "linear: {x: 0.2} angular: {z: 0.0}" -r 10
+-->
+<launch>
+
+  <!-- Parameter robot -->
+  <param name="robot_description"
+         command="$(find xacro)/xacro
+                  $(find modul09_kinematika)/urdf/diff_robot.urdf.xacro"/>
+
+  <!-- Gazebo world kosong -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name"   value="worlds/empty.world"/>
+    <arg name="paused"       value="false"/>
+    <arg name="use_sim_time" value="true"/>
+    <arg name="gui"          value="true"/>
+    <arg name="debug"        value="false"/>
+  </include>
+
+  <!-- Spawn robot -->
+  <node name="spawn_robot"
+        pkg="gazebo_ros"
+        type="spawn_model"
+        args="-urdf -model diff_robot -param robot_description -x 0 -y 0 -z 0.1"
+        output="screen"/>
+
+  <!-- Load controllers config -->
+  <rosparam file="$(find modul09_kinematika)/config/controllers.yaml"
+            command="load"/>
+
+  <!-- Spawn controllers via controller_manager -->
+  <node name="controller_spawner"
+        pkg="controller_manager"
+        type="spawner"
+        respawn="false"
+        output="screen"
+        args="joint_state_controller diff_drive_controller"/>
+
+  <!-- robot_state_publisher -->
+  <node name="robot_state_publisher"
+        pkg="robot_state_publisher"
+        type="robot_state_publisher"
+        output="screen"/>
+
+  <!-- RViz -->
+  <node name="rviz"
+        pkg="rviz"
+        type="rviz"
+        output="screen"
+        required="false"/>
+
+</launch>

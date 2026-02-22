@@ -1,0 +1,49 @@
+<!-- p07_urdf.launch
+     Visualisasi URDF robot diferensial di RViz
+     Modul 09 - ROS Kinematika dan Kontroler
+     Prodi Teknologi Rekayasa Otomasi
+
+     Jalankan: roslaunch modul09_kinematika p07_urdf.launch
+-->
+<launch>
+
+  <!-- Load URDF/Xacro ke parameter server -->
+  <param name="robot_description"
+         command="$(find xacro)/xacro
+                  $(find modul09_kinematika)/urdf/diff_robot.urdf.xacro"/>
+
+  <!-- robot_state_publisher: publish FK dari joint_states ke /tf -->
+  <node name="robot_state_publisher"
+        pkg="robot_state_publisher"
+        type="robot_state_publisher"
+        output="screen">
+    <param name="publish_frequency" value="50"/>
+  </node>
+
+  <!-- joint_state_publisher_gui: slider untuk menggerakkan joint secara manual -->
+  <node name="joint_state_publisher_gui"
+        pkg="joint_state_publisher_gui"
+        type="joint_state_publisher_gui"
+        output="screen"/>
+
+  <!-- Publish static transform: odom → base_footprint (untuk RViz) -->
+  <node name="static_tf_odom"
+        pkg="tf2_ros"
+        type="static_transform_publisher"
+        args="0 0 0 0 0 0 odom base_footprint"/>
+
+  <!-- RViz dengan konfigurasi default -->
+  <node name="rviz"
+        pkg="rviz"
+        type="rviz"
+        args="-d $(find modul09_kinematika)/config/urdf_view.rviz"
+        output="screen"
+        required="false"/>
+
+  <node name="rqt_tf_tree"
+        pkg="rqt_tf_tree"
+        type="rqt_tf_tree"
+        output="screen"
+        required="false"/>
+
+</launch>
